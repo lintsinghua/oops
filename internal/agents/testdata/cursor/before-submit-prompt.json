@@ -1,0 +1,9 @@
+{
+  "conversation_id": "sess-cursor-1",
+  "generation_id": "gen-1",
+  "model": "composer",
+  "prompt": "fix the build",
+  "hook_event_name": "beforeSubmitPrompt",
+  "workspace_roots": ["WORKDIR"],
+  "cwd": "WORKDIR"
+}

@@ -32,8 +32,8 @@ func Parse(agent, kind string, raw []byte) Event {
 	}
 	ev.Raw = m
 	ev.CWD = firstString(m, "cwd", "workspace", "workspace_dir", "project_dir", "root")
-	ev.SessionID = firstString(m, "session_id", "sessionId", "session")
-	ev.TurnID = firstString(m, "turn_id", "turnId")
+	ev.SessionID = firstString(m, "session_id", "sessionId", "session", "conversation_id")
+	ev.TurnID = firstString(m, "turn_id", "turnId", "generation_id")
 	ev.Prompt = firstString(m, "prompt", "user_prompt", "message", "text", "input")
 	if ev.Prompt == "" {
 		ev.Prompt = findPrompt(m)

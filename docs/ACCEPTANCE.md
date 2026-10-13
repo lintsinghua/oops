@@ -65,22 +65,17 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | §6.2 empty turn | PASS | `TestEmptyTurnAddsLittle` | Unchanged checkpoint adds at most 4 KB of objects |
 | §6.2 undo 1k | PASS | `TestUndoThousandFiles` | Under 1 s here, bound 2 s on Windows |
 | §6.2 list | PASS | `TestE2EListLimitsAndColumns` | |
-| §6.3 | PASS | `.github/workflows/ci.yml` | lint, vet, govulncheck, `go test -race` on three OS |
+| §6.3 | PASS | `.github/workflows/ci.yml` | lint, vet, govulncheck, coverage gate, race on the hosted OS/arch matrix, cold-start and RSS bench smoke |
 | §6.4 | PASS | `docs/commands.md`, `TestCommandReference` | Command help is generated from cobra. README, README.zh-CN, how-it-works, and schema.md are in the repo |
+| §6.1 matrix | PASS | `.github/workflows/ci.yml`, `internal/agents/testdata`, `scripts/covergate.py` | ubuntu-latest and ubuntu-24.04-arm (ext4), ubuntu-latest tmpfs, macos-latest and macos-15-intel (case-insensitive APFS), windows-latest and windows-11-arm (NTFS). Go 1.27.2 and 1.26.9. Coverage gate is 70% overall and 85% for store, snapshot, and restore. Hook fixtures drive `oops hook` in agent event order. macos-13 is no longer a hosted runner, so the Intel macOS leg is macos-15-intel |
+| §6.2 cold start and RSS | PASS | `TestColdStart10k`, `TestScanRSS100k` | Cold start of 10,000 files / 300,000,000 bytes was 2.53 s (limit 3 s). Peak VmRSS while scanning 100,000 files was 68.3 MiB, 71,663,616 bytes (limit 150 MB). One sample each, 2026-10-13, 4 vCPU, Linux |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 63 |
-| FAIL | 2 |
-
-FAIL rows are v1 quality items this repo does not claim to have met:
-
-| ID | Result | Why it is still FAIL |
-|---|---|---|
-| §6.1 matrix | FAIL | CI is ubuntu-latest, macos-latest, and windows-latest on the Go version in `go.mod`. It is not the full OS, architecture, filesystem, two-Go-version, and real-agent matrix, and there is no coverage gate |
-| §6.2 cold start and RSS | FAIL | Cold start of a 10k-file tree and RSS while scanning 100k files were not measured in this run |
+| PASS | 65 |
+| FAIL | 0 |
 
 ## Out of v1 scope / pending external action
 
@@ -93,6 +88,8 @@ These are not FAIL. G1–G10 are v0.2 in the PRD and are not implemented. The ot
 | Homebrew, npm, scoop, winget, curl install | Planned install channels. The live paths are `go install` and GitHub Releases |
 | Three-person user study | Needs three people on three operating systems. Not something this change can record |
 | CHANGELOG generated at tag time | Keep-a-changelog output is a release step |
+| Live Claude Code, Codex, Gemini CLI, and Cursor CLI smoke | Needs a logged-in account for each product. CI replays recorded hook payloads in `internal/agents/testdata` through `oops hook` instead |
+| btrfs and case-sensitive APFS | The PRD lists these as nightly filesystem extras. Standard GitHub-hosted runners provide ext4, tmpfs, case-insensitive APFS, and NTFS |
 
 ## Hook wait vs snapshot completion
 

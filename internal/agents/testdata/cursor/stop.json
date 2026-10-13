@@ -1,0 +1,7 @@
+{
+  "conversation_id": "sess-cursor-1",
+  "generation_id": "gen-1",
+  "hook_event_name": "stop",
+  "cwd": "WORKDIR",
+  "status": "completed"
+}

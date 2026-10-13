@@ -1,0 +1,7 @@
+{
+  "session_id": "sess-claude-1",
+  "transcript_path": "/tmp/claude-transcript.jsonl",
+  "cwd": "WORKDIR",
+  "hook_event_name": "Stop",
+  "stop_hook_active": false
+}

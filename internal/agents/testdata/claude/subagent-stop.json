@@ -1,0 +1,8 @@
+{
+  "session_id": "sess-claude-1",
+  "transcript_path": "/tmp/claude-transcript.jsonl",
+  "cwd": "WORKDIR",
+  "hook_event_name": "SubagentStop",
+  "agent_id": "sub-1",
+  "agent_transcript_path": "/tmp/sub.jsonl"
+}
