@@ -1,76 +1,72 @@
 #!/usr/bin/env python3
-"""Check the designer-authored oops logo set.
+"""Generate oops brand SVGs. Text is converted to outlines (Geist SemiBold, OFL)
+so the files render identically everywhere (GitHub, browsers, rsvg)."""
+from fontTools.ttLib import TTFont
+from fontTools.varLib import instancer
+from fontTools.pens.svgPathPen import SVGPathPen
+from fontTools.pens.transformPen import TransformPen
+from fontTools.pens.boundsPen import BoundsPen
+import os
 
-The letterforms live in brand/logo and are not redrawn here. v2 replaces v1:
-the two o's are a pair of eyes looking back, and the file names changed.
-This script only checks that the v2 files are present and internally consistent.
-"""
+OUT = os.path.join(os.path.dirname(__file__), "..", "logo")
+GEIST = "/usr/share/fonts/truetype/sand-box/google/Geist/Geist-VariableFont_wght.ttf"
 
-from __future__ import annotations
+INK_LIGHT, INK_DARK = "#0A0A0A", "#EDEDED"     # mark/text on light bg, on dark bg
+AMBER_DARK, AMBER_LIGHT = "#F5A524", "#B76E00"  # DESIGN §5.1 accent
 
-import sys
-import xml.etree.ElementTree as ET
-from pathlib import Path
+# ---- the mark (64×64 grid) ------------------------------------------------
+# A ring (the "o") drawn 270° clockwise from 12 o'clock to 9 o'clock; an arrowhead
+# at 12 o'clock points counter-clockwise (= back in time). The dot in the centre
+# is the snapshot you return to.
+# Optical centring: the arrowhead reaches higher than the ring, so the ring
+# centre sits at y=34.5 to leave equal 6-unit margins top and bottom.
+def mark(ink, accent, tx=0, ty=0, s=1, small=False):
+    sw, r, dot = (9, 19, 6.5) if small else (7, 20, 5.5)   # small = favicon-tuned
+    cy = 34.5
+    top = cy - r
+    ah = sw / 2 + 5                                         # arrowhead half-height
+    return (f'<g transform="translate({tx} {ty}) scale({s})">'
+            f'<path d="M32 {top}A{r} {r} 0 1 1 {32 - r} {cy}" fill="none" stroke="{ink}" stroke-width="{sw}" stroke-linecap="round"/>'
+            f'<path d="M33 {top - ah}L{33 - ah * 1.35:.2f} {top}L33 {top + ah}z" fill="{ink}"/>'
+            f'<circle cx="32" cy="{cy}" r="{dot}" fill="{accent}"/></g>')
 
-ROOT = Path(__file__).resolve().parents[1]
-LOGO = ROOT / "logo"
+def svg(w, h, body, title="oops"):
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" '
+            f'role="img" aria-label="{title}"><title>{title}</title>{body}</svg>\n')
 
-# Canonical v2 names. Do not reintroduce v1 filenames.
-SVG = (
-    "wordmark-light.svg",
-    "wordmark-dark.svg",
-    "mark-light.svg",
-    "mark-dark.svg",
-    "icon.svg",
-    "favicon.svg",
-)
-PNG = (
-    "png/wordmark-light-160h.png",
-    "png/wordmark-dark-160h.png",
-    "png/mark-light-512.png",
-    "png/mark-dark-512.png",
-    "png/icon-180.png",
-    "png/icon-512.png",
-    "png/icon-1024.png",
-    "png/favicon-16.png",
-    "png/favicon-32.png",
-    "png/favicon-48.png",
-)
+def write(name, content):
+    with open(os.path.join(OUT, name), "w") as fh:
+        fh.write(content)
 
-# Light files are black ink; dark files are white ink. Accept #000/#fff and
-# the interim ink values until the black-and-white drop-in lands.
-LIGHT_FILLS = {"#000", "#000000", "#17120E"}
-DARK_FILLS = {"#FFF", "#FFFFFF", "#F5F0EA"}
+# ---- wordmark text to outlines --------------------------------------------
+font = instancer.instantiateVariableFont(TTFont(GEIST), {"wght": 600})
+gs, cmap = font.getGlyphSet(), font.getBestCmap()
+UPM = font["head"].unitsPerEm
 
+def text_path(txt, size, x0, baseline, tracking=-0.02):
+    pen = SVGPathPen(gs)
+    scale = size / UPM
+    x = x0
+    for ch in txt:
+        g = cmap[ord(ch)]
+        gs[g].draw(TransformPen(pen, (scale, 0, 0, -scale, x, baseline)))
+        x += gs[g].width * scale + tracking * size
+    return pen.getCommands(), x - tracking * size
 
-def local(tag: str) -> str:
-    return tag.rsplit("}", 1)[-1]
+MS = 1.125                      # mark scale inside the wordmark (72 px tall)
+SIZE = 68                       # x-height 0.53em ≈ 36
+BASE = 34.5 * MS + 18           # x-height band centred on the ring centre
+d, xend = text_path("oops", SIZE, 64 * MS + 14, BASE)
+W, H = int(round(xend + 2)), 76
 
+for suffix, ink, acc in (("", INK_LIGHT, AMBER_LIGHT), ("-dark", INK_DARK, AMBER_DARK)):
+    write(f"oops-mark{suffix}.svg", svg(64, 64, mark(ink, acc)))
+    write(f"oops-wordmark{suffix}.svg", svg(W, H, mark(ink, acc, 0, 0, MS) + f'<path d="{d}" fill="{ink}"/>'))
+    write(f"oops-favicon{suffix}.svg", svg(64, 64, mark(ink, acc, small=True)))
 
-def main() -> int:
-    missing = [name for name in SVG + PNG if not (LOGO / name).is_file()]
-    if missing:
-        print("missing logo files:", ", ".join(missing), file=sys.stderr)
-        return 1
-    for name in ("wordmark-light.svg", "wordmark-dark.svg", "mark-light.svg", "mark-dark.svg"):
-        tree = ET.parse(LOGO / name)
-        circles = [el for el in tree.getroot().iter() if local(el.tag) == "circle"]
-        if len(circles) < 2:
-            print(f"{name}: expected two eye pupils", file=sys.stderr)
-            return 1
-        allowed = LIGHT_FILLS if "light" in name else DARK_FILLS
-        fills = {el.get("fill", "").upper() for el in circles}
-        if not fills or not fills <= allowed:
-            print(f"{name}: pupil fill {fills}, want black or white ink", file=sys.stderr)
-            return 1
-        # Pupils sit left of each counter, so the pair looks back.
-        xs = sorted(float(el.get("cx")) for el in circles)
-        if xs[1] - xs[0] < 40:
-            print(f"{name}: pupils are not a pair", file=sys.stderr)
-            return 1
-    print(f"logo set ok ({len(SVG)} svg, {len(PNG)} png)")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+# single-colour mark that follows the surrounding text colour
+write("oops-mark-mono.svg", svg(64, 64, mark("currentColor", "currentColor")))
+# app icon / avatar: mark on a rounded square
+write("oops-icon.svg", svg(512, 512,
+      '<rect width="512" height="512" rx="112" fill="#0A0A0A"/>' + mark(INK_DARK, AMBER_DARK, 96, 96, 5)))
+print("wordmark size", W, H)
