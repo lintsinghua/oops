@@ -21,9 +21,8 @@
   <a href="./README.md">English</a> · 简体中文
 </p>
 
-<!-- TODO(demo): 用 `vhs vhs/demo.tape` 录制后，替换为 assets/demo.gif -->
 <p align="center">
-  <img alt="Agent 执行了 rm -rf src && git clean -fdx；敲 oops 打开时间线，回车后所有文件回来。" src="assets/demo.gif" width="820">
+  <img alt="oops run 包住 rm -rf src &amp;&amp; git clean -fdx。oops undo 把 src 和 .env 恢复回来。" src="assets/demo.gif" width="820">
 </p>
 
 ```sh
