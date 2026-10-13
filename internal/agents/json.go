@@ -113,7 +113,31 @@ func WriteJSON(path string, obj map[string]any, previous []byte) (Change, error)
 
 // Connected reports whether the document already contains an oops hook.
 func Connected(v any) bool {
-	return strings.Contains(flat(v), Marker)
+	if strings.Contains(flat(v), Marker) {
+		return true
+	}
+	return walkCommands(v)
+}
+
+func walkCommands(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		if _, ok := t["command"]; ok && isOopsCommand(t) {
+			return true
+		}
+		for _, child := range t {
+			if walkCommands(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range t {
+			if walkCommands(child) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func flat(v any) string {
@@ -146,7 +170,7 @@ func EnsureHooks(doc map[string]any, groups map[string][]map[string]any) bool {
 }
 
 func eventConnected(v any) bool {
-	return strings.Contains(flat(v), Marker)
+	return Connected(v)
 }
 
 // RemoveOops deletes hook entries that oops installed. It returns true when
@@ -211,26 +235,37 @@ func dropEmpty(v any) bool {
 }
 
 func isOopsCommand(m map[string]any) bool {
-	if s, ok := m["command"].(string); ok && strings.Contains(s, Marker) {
+	line := commandLine(m)
+	if line == "" {
+		return false
+	}
+	if strings.Contains(line, Marker) {
 		return true
 	}
-	if args, ok := m["args"].([]any); ok {
-		var parts []string
-		for _, a := range args {
-			if s, ok := a.(string); ok {
-				parts = append(parts, s)
-			}
-		}
-		if strings.Contains(strings.Join(parts, " "), "hook") && containsOops(m) {
+	// The executable is not always named oops (tests, wrappers). The argv
+	// shape `hook <agent> <event>` is the marker the adapters install.
+	for _, agent := range []string{"claude", "codex", "gemini", "cursor"} {
+		if strings.Contains(line, "hook "+agent) {
 			return true
 		}
 	}
 	return false
 }
 
-func containsOops(m map[string]any) bool {
-	s, _ := m["command"].(string)
-	return strings.Contains(s, "oops") || strings.HasSuffix(s, "oops.exe")
+func commandLine(m map[string]any) string {
+	cmd, _ := m["command"].(string)
+	parts := []string{}
+	if cmd != "" {
+		parts = append(parts, cmd)
+	}
+	if args, ok := m["args"].([]any); ok {
+		for _, a := range args {
+			if s, ok := a.(string); ok {
+				parts = append(parts, s)
+			}
+		}
+	}
+	return strings.Join(parts, " ")
 }
 
 // Command builds a nested hook group used by Claude-style configs.

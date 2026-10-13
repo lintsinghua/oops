@@ -40,10 +40,12 @@ Commands that accept `--json` print a single JSON document with `"schema_version
   "prompt": "first line",
   "stats": {"files": 1},
   "files": [
-    {"path": "a.txt", "action": "modified", "insertions": 1, "deletions": 1}
+    {"path": "a.txt", "action": "modified", "insertions": 1, "deletions": 1, "untracked": true}
   ]
 }
 ```
+
+`untracked` and `ignored` are omitted when false. `ignored` is set when `git check-ignore` matches the path.
 
 ## `oops diff --json`
 

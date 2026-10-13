@@ -59,10 +59,16 @@ func (e *Engine) runningTurn(ws Workspace, session string) (meta.Turn, error) {
 	return meta.Turn{}, err
 }
 
+// pendingWait is the longest a command waits for a background post snapshot
+// before it finishes that snapshot itself.
+const pendingWait = 30 * time.Second
+
 // WaitPending blocks until a background post-snapshot for ws has finished.
 // If the background process is gone, this process finishes the job itself.
+// The wait is bounded by pendingWait. When nothing is queued it returns
+// without sleeping.
 func (e *Engine) WaitPending(ctx context.Context, ws Workspace) error {
-	deadline := time.Now().Add(30 * time.Second)
+	deadline := time.Now().Add(pendingWait)
 	for {
 		if !e.hasPending(ws) {
 			return nil

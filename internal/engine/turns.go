@@ -41,6 +41,9 @@ func (e *Engine) StartTurn(ctx context.Context, in TurnInput) (meta.Turn, error)
 	if err != nil {
 		return meta.Turn{}, err
 	}
+	if snap.Partial {
+		e.AddNotice(in.Workspace, "partial", "snapshot took too long and was partial. Run oops doctor")
+	}
 	var overlaps []int
 	for _, o := range others {
 		overlaps = append(overlaps, o.Seq)

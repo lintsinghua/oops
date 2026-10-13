@@ -281,10 +281,17 @@ func (db *DB) GetTurn(ws string, seq int) (Turn, error) {
 	return scanTurn(row)
 }
 
-// LatestDone returns the highest done or undone non-safety turn.
+// LatestFinished returns the highest done or undone non-safety turn.
 func (db *DB) LatestFinished(ws string) (Turn, error) {
 	row := db.sql.QueryRow(`SELECT id, ws, seq, agent, session_id, agent_turn_id, kind, prompt_summary, started_at, ended_at, status, pre_snap, post_snap, stats
 		FROM turns WHERE ws=? AND kind!='safety' AND status!='running' ORDER BY seq DESC LIMIT 1`, ws)
+	return scanTurn(row)
+}
+
+// LatestUndoable returns the newest finished turn that is not already undone.
+func (db *DB) LatestUndoable(ws string) (Turn, error) {
+	row := db.sql.QueryRow(`SELECT id, ws, seq, agent, session_id, agent_turn_id, kind, prompt_summary, started_at, ended_at, status, pre_snap, post_snap, stats
+		FROM turns WHERE ws=? AND kind!='safety' AND status NOT IN ('running','undone') ORDER BY seq DESC LIMIT 1`, ws)
 	return scanTurn(row)
 }
 
@@ -396,6 +403,38 @@ func (db *DB) LatestAppliedOp(ws string) (Op, error) {
 	row := db.sql.QueryRow(`SELECT id, ws, type, target_turns, safety_snap, created_at, status, detail, applied
 		FROM ops WHERE ws=? AND applied=1 ORDER BY id DESC LIMIT 1`, ws)
 	return scanOp(row)
+}
+
+// LatestStackOp returns the newest undo, rewind, or restore that has not been discarded.
+func (db *DB) LatestStackOp(ws string) (Op, error) {
+	row := db.sql.QueryRow(`SELECT id, ws, type, target_turns, safety_snap, created_at, status, detail, applied
+		FROM ops WHERE ws=? AND type IN ('undo','rewind','restore') AND status!='discarded' ORDER BY id DESC LIMIT 1`, ws)
+	return scanOp(row)
+}
+
+// LatestAppliedStackOp returns the newest applied undo, rewind, or restore.
+func (db *DB) LatestAppliedStackOp(ws string) (Op, error) {
+	row := db.sql.QueryRow(`SELECT id, ws, type, target_turns, safety_snap, created_at, status, detail, applied
+		FROM ops WHERE ws=? AND applied=1 AND type IN ('undo','rewind','restore') AND status!='discarded' ORDER BY id DESC LIMIT 1`, ws)
+	return scanOp(row)
+}
+
+// DiscardUnapplied drops the redo stack so a new undo cannot revive it.
+func (db *DB) DiscardUnapplied(ws string) error {
+	_, err := db.sql.Exec(`UPDATE ops SET status='discarded' WHERE ws=? AND applied=0 AND type IN ('undo','rewind','restore') AND status!='discarded'`, ws)
+	return err
+}
+
+// MoveToRedoStack marks op unapplied and reinserts it so it is the newest
+// stack row. Undo with no turn number reapplies that newest unapplied row.
+func (db *DB) MoveToRedoStack(op Op) error {
+	if _, err := db.sql.Exec(`DELETE FROM ops WHERE id=?`, op.ID); err != nil {
+		return err
+	}
+	op.ID = 0
+	op.Applied = false
+	_, err := db.InsertOp(op)
+	return err
 }
 
 // SetOpApplied updates the applied bit.

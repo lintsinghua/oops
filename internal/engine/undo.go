@@ -38,10 +38,25 @@ type UndoResult struct {
 	Seqs    []int    `json:"seqs,omitempty"`
 }
 
-// Undo reverses one finished turn.
+// Undo reverses one finished turn. With no turn number, a redo is undone
+// first (the stack), and a still-running turn is refused unless Running is set.
 func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) {
 	if err := e.WaitPending(ctx, req.Workspace); err != nil {
 		return UndoResult{}, err
+	}
+	if req.Seq == 0 && len(req.Files) == 0 && !req.Running {
+		running, err := e.DB.RunningTurns(req.Workspace.ID)
+		if err != nil {
+			return UndoResult{}, err
+		}
+		if len(running) > 0 {
+			return UndoResult{}, &RunningError{Turn: running[len(running)-1]}
+		}
+	}
+	if req.Seq == 0 && len(req.Files) == 0 {
+		if op, err := e.DB.LatestStackOp(req.Workspace.ID); err == nil && !op.Applied {
+			return e.reapply(ctx, req.Workspace, op, req.DryRun)
+		}
 	}
 	t, err := e.turnForUndo(ctx, req)
 	if err != nil {
@@ -74,7 +89,10 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 	if req.DryRun {
 		return res, nil
 	}
-	if err := e.apply(ctx, req.Workspace, "undo", []int{t.Seq}, curSnap.ID, items); err != nil {
+	if err := e.DB.DiscardUnapplied(req.Workspace.ID); err != nil {
+		return res, err
+	}
+	if err := e.apply(ctx, req.Workspace, "undo", []int{t.Seq}, curSnap.ID, items, true); err != nil {
 		return res, err
 	}
 	if len(req.Files) == 0 && !hasKept(items) {
@@ -91,7 +109,19 @@ func (e *Engine) turnForUndo(ctx context.Context, req UndoRequest) (meta.Turn, e
 	var t meta.Turn
 	var err error
 	if req.Seq == 0 {
-		t, err = e.DB.LatestFinished(req.Workspace.ID)
+		if req.Running {
+			running, rerr := e.DB.RunningTurns(req.Workspace.ID)
+			if rerr != nil {
+				return t, rerr
+			}
+			if len(running) > 0 {
+				t = running[len(running)-1]
+			} else {
+				t, err = e.DB.LatestUndoable(req.Workspace.ID)
+			}
+		} else {
+			t, err = e.DB.LatestUndoable(req.Workspace.ID)
+		}
 	} else {
 		t, err = e.DB.GetTurn(req.Workspace.ID, req.Seq)
 	}
@@ -169,7 +199,10 @@ func (e *Engine) Rewind(ctx context.Context, ws Workspace, seq int, force, dry b
 	if dry {
 		return res, nil
 	}
-	if err := e.apply(ctx, ws, "rewind", seqs, curSnap.ID, items); err != nil {
+	if err := e.DB.DiscardUnapplied(ws.ID); err != nil {
+		return res, err
+	}
+	if err := e.apply(ctx, ws, "rewind", seqs, curSnap.ID, items, true); err != nil {
 		return res, err
 	}
 	for _, t := range turns {
@@ -195,6 +228,9 @@ func (e *Engine) turnsFrom(ws Workspace, seq int) ([]meta.Turn, error) {
 
 // RestoreFiles brings paths back from before seq.
 func (e *Engine) RestoreFiles(ctx context.Context, ws Workspace, seq int, paths []string, force, dry bool) (UndoResult, error) {
+	if err := e.WaitPending(ctx, ws); err != nil {
+		return UndoResult{}, err
+	}
 	t, err := e.DB.GetTurn(ws.ID, seq)
 	if err != nil {
 		return UndoResult{}, err
@@ -246,18 +282,24 @@ func (e *Engine) RestoreFiles(ctx context.Context, ws Workspace, seq int, paths 
 	if hasKept(items) {
 		return res, nil
 	}
-	if err := e.apply(ctx, ws, "restore", []int{seq}, curSnap.ID, items); err != nil {
+	if err := e.DB.DiscardUnapplied(ws.ID); err != nil {
+		return res, err
+	}
+	if err := e.apply(ctx, ws, "restore", []int{seq}, curSnap.ID, items, true); err != nil {
 		return res, err
 	}
 	return res, nil
 }
 
-// Redo inverts the latest applied operation. dry reports the plan and writes nothing.
+// Redo inverts the newest applied undo, rewind, or restore. The redo record
+// itself is not applied, so a second redo pops the previous operation and
+// `undo` with no turn number puts the redone operation back. dry reports the
+// plan and writes nothing.
 func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, error) {
 	if err := e.WaitPending(ctx, ws); err != nil {
 		return UndoResult{}, err
 	}
-	op, err := e.DB.LatestAppliedOp(ws.ID)
+	op, err := e.DB.LatestAppliedStackOp(ws.ID)
 	if err != nil {
 		return UndoResult{}, err
 	}
@@ -288,10 +330,12 @@ func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, 
 	if dry || hasKept(items) {
 		return res, nil
 	}
-	if err := e.apply(ctx, ws, "redo", op.Targets, curSnap.ID, items); err != nil {
+	if err := e.apply(ctx, ws, "redo", op.Targets, curSnap.ID, items, false); err != nil {
 		return res, err
 	}
-	_ = e.DB.SetOpApplied(op.ID, false)
+	if err := e.DB.MoveToRedoStack(op); err != nil {
+		return res, err
+	}
 	for _, seq := range op.Targets {
 		if t, err := e.DB.GetTurn(ws.ID, seq); err == nil && op.Type != "restore" {
 			_ = e.DB.SetStatus(t.ID, "done")
@@ -312,8 +356,74 @@ type opDetail struct {
 	Items []restore.Item `json:"items"`
 }
 
-func (e *Engine) apply(ctx context.Context, ws Workspace, kind string, seqs []int, safety string, items []restore.Item) error {
+// reapply puts an undone stack operation back into effect (undo of a redo).
+func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool) (UndoResult, error) {
+	var detail opDetail
+	if err := json.Unmarshal([]byte(op.Detail), &detail); err != nil {
+		return UndoResult{}, err
+	}
+	curSnap, curRes, err := e.Capture(ctx, ws, SnapOptions{})
+	if err != nil {
+		return UndoResult{}, err
+	}
+	var items []restore.Item
+	for _, ef := range detail.Items {
+		if ef.Op == "skip" {
+			continue
+		}
+		now := lookup(curRes.Files, ef.Path)
+		switch {
+		case snapshot.SameState(now, ef.Want) || snapshot.SameState(now, ef.After):
+			items = append(items, restore.Item{Path: ef.Path, Op: "skip", Reason: "already", Before: now, Want: ef.Want, After: ef.Want})
+		case !snapshot.SameState(now, ef.Before):
+			items = append(items, restore.Item{Path: ef.Path, Op: "kept", Reason: "changed_after_turn", Before: now, Want: ef.Want})
+		default:
+			opName := "revert"
+			if ef.Want == nil {
+				opName = "remove"
+			} else if now == nil {
+				opName = "restore"
+			}
+			items = append(items, restore.Item{Path: ef.Path, Op: opName, Before: now, Want: ef.Want, After: ef.Want})
+		}
+	}
+	res := UndoResult{Result: resultOf(items), Effects: effects(items), Seqs: op.Targets, DryRun: dry}
+	if dry || hasKept(items) {
+		return res, nil
+	}
+	if err := e.restoreItems(ws, curSnap.ID, items); err != nil {
+		return res, err
+	}
+	if err := e.DB.SetOpApplied(op.ID, true); err != nil {
+		return res, err
+	}
+	if op.Type != "restore" {
+		for _, seq := range op.Targets {
+			if t, err := e.DB.GetTurn(ws.ID, seq); err == nil {
+				_ = e.DB.SetStatus(t.ID, "undone")
+			}
+		}
+	}
+	return res, nil
+}
+
+func (e *Engine) apply(ctx context.Context, ws Workspace, kind string, seqs []int, safety string, items []restore.Item, applied bool) error {
+	if err := e.restoreItems(ws, safety, items); err != nil {
+		return err
+	}
 	_ = ctx
+	detail, err := json.Marshal(opDetail{Items: items})
+	if err != nil {
+		return err
+	}
+	_, err = e.DB.InsertOp(meta.Op{
+		WS: ws.ID, Type: kind, Targets: seqs, SafetySnap: safety,
+		CreatedAt: e.Now, Status: "committed", Detail: string(detail), Applied: applied,
+	})
+	return err
+}
+
+func (e *Engine) restoreItems(ws Workspace, safety string, items []restore.Item) error {
 	jpath := filepath.Join(e.wsDir(ws.ID), "journal", "current.json")
 	if err := os.MkdirAll(filepath.Dir(jpath), 0o700); err != nil {
 		return err
@@ -326,18 +436,7 @@ func (e *Engine) apply(ctx context.Context, ws Workspace, kind string, seqs []in
 		return err
 	}
 	j.Status = "committed"
-	if err := restore.WriteJournal(jpath, j); err != nil {
-		return err
-	}
-	detail, err := json.Marshal(opDetail{Items: items})
-	if err != nil {
-		return err
-	}
-	_, err = e.DB.InsertOp(meta.Op{
-		WS: ws.ID, Type: kind, Targets: seqs, SafetySnap: safety,
-		CreatedAt: e.Now, Status: "committed", Detail: string(detail), Applied: true,
-	})
-	return err
+	return restore.WriteJournal(jpath, j)
 }
 
 // ResumeJournal finishes or rolls back an interrupted restore.

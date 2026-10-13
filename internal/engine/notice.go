@@ -25,7 +25,7 @@ func (e *Engine) AddNotice(ws Workspace, reason, text string) {
 	}
 	cur := e.readNotices(ws)
 	for _, n := range cur {
-		if n.Reason == reason && !n.Shown {
+		if n.Reason == reason {
 			return
 		}
 	}

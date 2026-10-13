@@ -3,11 +3,17 @@
 package platform
 
 import (
+	"errors"
 	"os"
 	"time"
 
 	"golang.org/x/sys/windows"
 )
+
+// IsBusy reports a sharing or lock conflict from a replace.
+func IsBusy(err error) bool {
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
+}
 
 func renameReplace(src, dst string) error {
 	backoffs := []time.Duration{0, 50 * time.Millisecond, 150 * time.Millisecond, 400 * time.Millisecond}

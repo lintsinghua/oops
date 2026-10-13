@@ -34,11 +34,15 @@ func TestHotCapturePercentiles(t *testing.T) {
 	}
 }
 
-// TestHookVisibleLatency times the post-turn hook process, which queues the
-// snapshot and returns. The capture runs in a detached child. p50/p95 use the
-// same nearest-rank method as TestHotCapturePercentiles (21 samples, index 10
-// and 19). Each sample is wall time from process start to exit of
-// `oops hook claude turn-end` on an unchanged tree, after one cold turn.
+// TestHookVisibleLatency times hook processes on an unchanged tree, after one
+// cold turn and after the previous background snapshot has finished.
+//
+// turn-end writes a job and returns. That duration is how long the agent waits
+// for the hook to return. It is not the snapshot completion time.
+// turn-start captures the pre snapshot before it returns, so that duration is
+// how long the agent waits for the pre snapshot to be stored.
+// p50/p95 use the same nearest-rank method as TestHotCapturePercentiles
+// (21 samples, index 10 and 19).
 func TestHookVisibleLatency(t *testing.T) {
 	if os.Getenv("OOPS_PERF") != "1" {
 		t.Skip("set OOPS_PERF=1 to measure hook-visible latency")
@@ -50,9 +54,11 @@ func TestHookVisibleLatency(t *testing.T) {
 		t.Fatalf("build: %v\n%s", err, out)
 	}
 	for _, n := range []int{10_000, 100_000} {
-		p50, p95 := hookEndPercentiles(t, bin, n, 21)
-		fmt.Printf("OOPS_HOOK files=%d samples=21 p50=%s p95=%s goos=%s goarch=%s ncpu=%d\n", n, p50, p95, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
-		t.Logf("hook files=%d p50=%s p95=%s", n, p50, p95)
+		end50, end95, start50, start95 := hookPercentiles(t, bin, n, 21)
+		fmt.Printf("OOPS_HOOK files=%d samples=21 p50=%s p95=%s goos=%s goarch=%s ncpu=%d\n", n, end50, end95, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+		fmt.Printf("OOPS_START files=%d samples=21 p50=%s p95=%s goos=%s goarch=%s ncpu=%d\n", n, start50, start95, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+		t.Logf("hook-end files=%d p50=%s p95=%s", n, end50, end95)
+		t.Logf("hook-start files=%d p50=%s p95=%s", n, start50, start95)
 	}
 }
 
@@ -74,7 +80,7 @@ func moduleRoot(t *testing.T) string {
 	}
 }
 
-func hookEndPercentiles(t *testing.T, bin string, n, samples int) (time.Duration, time.Duration) {
+func hookPercentiles(t *testing.T, bin string, n, samples int) (end50, end95, start50, start95 time.Duration) {
 	t.Helper()
 	home := t.TempDir()
 	root := t.TempDir()
@@ -102,22 +108,26 @@ func hookEndPercentiles(t *testing.T, bin string, n, samples int) (time.Duration
 	if err := waitPending(home); err != nil {
 		t.Fatal(err)
 	}
-	durs := make([]time.Duration, 0, samples)
+	ends := make([]time.Duration, 0, samples)
+	starts := make([]time.Duration, 0, samples)
 	for i := 0; i < samples; i++ {
-		if _, err := runHook(bin, home, root, "turn-start"); err != nil {
-			t.Fatal(err)
-		}
-		d, err := runHook(bin, home, root, "turn-end")
+		ds, err := runHook(bin, home, root, "turn-start")
 		if err != nil {
 			t.Fatal(err)
 		}
-		durs = append(durs, d)
+		starts = append(starts, ds)
+		de, err := runHook(bin, home, root, "turn-end")
+		if err != nil {
+			t.Fatal(err)
+		}
+		ends = append(ends, de)
 		if err := waitPending(home); err != nil {
 			t.Fatal(err)
 		}
 	}
-	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
-	return durs[10], durs[19]
+	sort.Slice(ends, func(i, j int) bool { return ends[i] < ends[j] })
+	sort.Slice(starts, func(i, j int) bool { return starts[i] < starts[j] })
+	return ends[10], ends[19], starts[10], starts[19]
 }
 
 func runHook(bin, home, root, event string) (time.Duration, error) {

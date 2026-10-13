@@ -35,9 +35,9 @@ func Plan(paths []string, expected, desired, cur map[string]snapshot.Meta, force
 			continue
 		}
 		seen[p] = struct{}{}
-		exp := lookupPtr(expected, p)
-		des := lookupPtr(desired, p)
-		now := lookupPtr(cur, p)
+		exp := lookupPlanned(expected, p, paths)
+		des := lookupPlanned(desired, p, paths)
+		now := lookupPlanned(cur, p, paths)
 		item := Item{Path: p, Before: now, Want: des, After: des}
 		switch {
 		case snapshot.SameState(now, des):
@@ -81,19 +81,35 @@ func needsBytes(m *snapshot.Meta) bool {
 	return m != nil && m.Kind == snapshot.KindFile
 }
 
-func lookupPtr(m map[string]snapshot.Meta, path string) *snapshot.Meta {
+// lookupPlanned finds path in m. An exact key wins. A case-insensitive match
+// is used only when no other path in this plan owns that spelling, so a
+// case-only rename stays a remove of the new name plus a restore of the old one.
+func lookupPlanned(m map[string]snapshot.Meta, path string, planned []string) *snapshot.Meta {
 	if v, ok := m[path]; ok {
 		cp := v
 		return &cp
 	}
 	key := platform.Key(path)
 	for k, v := range m {
-		if platform.Key(k) == key {
-			cp := v
-			return &cp
+		if platform.Key(k) != key {
+			continue
 		}
+		if plannedOwns(planned, k) {
+			continue
+		}
+		cp := v
+		return &cp
 	}
 	return nil
+}
+
+func plannedOwns(planned []string, key string) bool {
+	for _, p := range planned {
+		if p == key {
+			return true
+		}
+	}
+	return false
 }
 
 // Apply writes the plan into root. st supplies blob bytes.
@@ -130,16 +146,23 @@ func Apply(root string, st *store.Store, items []Item) error {
 			return err
 		}
 	}
-	if err := caseRenames(root, writes, removes); err != nil {
+	renamed, err := caseRenames(root, writes, removes)
+	if err != nil {
 		return err
 	}
 	for _, it := range writes {
 		if err := writeOne(root, st, it); err != nil {
+			if platform.IsBusy(err) {
+				return &BusyError{Path: it.Path, Err: err}
+			}
 			return err
 		}
 	}
 	sort.Slice(removes, func(i, j int) bool { return len(removes[i].Path) > len(removes[j].Path) })
 	for _, it := range removes {
+		if _, ok := renamed[it.Path]; ok {
+			continue
+		}
 		full, err := platform.SafeRel(root, it.Path)
 		if err != nil {
 			return err
@@ -162,7 +185,12 @@ func Apply(root string, st *store.Store, items []Item) error {
 	return nil
 }
 
-func caseRenames(root string, writes, removes []Item) error {
+// caseRenames moves a case-only rename onto the spelling undo should restore.
+// The returned set is the remove paths already renamed; Apply must not delete
+// them afterwards, because on a case-insensitive volume that delete removes
+// the restored file.
+func caseRenames(root string, writes, removes []Item) (map[string]struct{}, error) {
+	done := map[string]struct{}{}
 	for _, rm := range removes {
 		for _, wr := range writes {
 			if rm.Path == wr.Path || !platform.Same(rm.Path, wr.Path) {
@@ -170,22 +198,23 @@ func caseRenames(root string, writes, removes []Item) error {
 			}
 			src, err := platform.SafeRel(root, rm.Path)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			dst, err := platform.SafeRel(root, wr.Path)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			tmp := src + ".oops-case-tmp"
 			if err := os.Rename(platform.LongPath(src), platform.LongPath(tmp)); err != nil {
-				return err
+				return nil, err
 			}
 			if err := os.Rename(platform.LongPath(tmp), platform.LongPath(dst)); err != nil {
-				return err
+				return nil, err
 			}
+			done[rm.Path] = struct{}{}
 		}
 	}
-	return nil
+	return done, nil
 }
 
 func writeOne(root string, st *store.Store, it Item) error {

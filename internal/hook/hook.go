@@ -172,8 +172,13 @@ func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Wr
 }
 
 func writeNotices(e *engine.Engine, ws engine.Workspace, ev agents.Event, stdout io.Writer) error {
+	// Only Claude consumes the notice here (systemMessage). Other agents
+	// show it on the next oops command, once per reason.
+	if ev.Agent != "claude" {
+		return nil
+	}
 	notes := e.TakeNotices(ws)
-	if len(notes) == 0 || ev.Agent != "claude" {
+	if len(notes) == 0 {
 		return nil
 	}
 	msg := "oops · " + notes[0].Text
