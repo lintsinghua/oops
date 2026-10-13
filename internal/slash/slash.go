@@ -36,7 +36,7 @@ func Run(e *engine.Engine, ws engine.Workspace, args []string, now time.Time) (s
 		}
 		return formatUndo(res), codeOf(res)
 	case "redo":
-		res, err := e.Redo(context.Background(), ws)
+		res, err := e.Redo(context.Background(), ws, false)
 		if err != nil {
 			if meta.IsNotFound(err) {
 				return "Nothing to redo.", 4

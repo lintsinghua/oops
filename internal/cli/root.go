@@ -133,21 +133,32 @@ func newRoot(opt *options) *cobra.Command {
 		newDoctorCmd(opt),
 		newGCCmd(opt),
 		newHookCmd(opt),
+		newMaintainCmd(opt),
+		newFinishPendingCmd(opt),
 	)
 	return root
 }
 
 func newVersionCommand() *cobra.Command {
-	return &cobra.Command{
+	var check bool
+	var url string
+	cmd := &cobra.Command{
 		Use:    "version",
 		Short:  "Print version, commit, and build date",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if check {
+				return checkLatest(cmd.OutOrStdout(), cmd.ErrOrStderr(), url)
+			}
 			_, err := fmt.Fprint(cmd.OutOrStdout(), versionText())
 			return err
 		},
 	}
+	cmd.Flags().BoolVar(&check, "check", false, "Check GitHub for a newer release")
+	cmd.Flags().StringVar(&url, "url", "", "Override the release check URL")
+	_ = cmd.Flags().MarkHidden("url")
+	return cmd
 }
 
 func versionText() string {
@@ -163,6 +174,7 @@ func newHookCmd(opt *options) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			hook.Run(args, hook.Options{
 				Home:   opt.home,
+				Config: opt.config,
 				Stdin:  opt.stdin,
 				Stdout: opt.stdout,
 				Stderr: opt.stderr,

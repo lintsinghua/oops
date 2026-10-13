@@ -81,13 +81,11 @@ Before any apply, oops writes a safety snapshot and a journal at `workspaces/<id
 
 The last finished turn is undone immediately by `oops undo`. An older turn, or `--force`, prints a preview and asks on a terminal; without a terminal it exits 2 unless you pass `-y`. `oops rewind` always asks unless you pass `-y`. The timeline (`oops` with a terminal, not `--json`, not `TERM=dumb`) asks before undo, rewind, and redo.
 
-`undo`, `rewind`, `restore`, and `gc` accept `-n` / `--dry-run`. `redo` and `snap` do not. `undo -n --json` still prints the text preview.
+`undo`, `rewind`, `redo`, `restore`, `snap`, and `gc` accept `-n` / `--dry-run`. `undo -n --json` and `show --json` print JSON (`schema_version` 1). `show --json` includes the file list. See [schema.md](schema.md).
 
 ## Garbage collection
 
-`oops gc` deletes turns in the current workspace that are past `retention.keep_turns` (default 500) or older than `retention.keep_days` (default 30), then deletes objects no remaining snapshot still references. Objects newer than one hour are kept even when nothing references them. `oops gc --all` deletes that workspace's turns and snapshot rows. `oops gc --all --global` does that for every workspace. Both `--all` forms ask for confirmation unless `-y` or `-n` is set.
-
-`retention.workspace_max` (default 2GB) and `retention.global_max` (default 10GB) are stored in config. `oops doctor` prints the workspace cap next to the current object size. Nothing in this build refuses a snapshot or runs gc because those caps were exceeded.
+After a post-turn snapshot finishes, a detached process runs retention: drop turns past `retention.keep_turns` (default 500) or older than `retention.keep_days` (default 30), then drop the oldest turns until object bytes fit `retention.workspace_max` (default 2GB) and `retention.global_max` (default 10GB). One pass deletes at most 64 turns and always leaves the newest turn. Objects newer than one hour stay, so a snapshot that is still being written is not deleted; `oops doctor` warns when usage is still over the cap. `oops gc` runs the same expiry for the current workspace. `oops gc --all` deletes that workspace's turns and snapshot rows. `oops gc --all --global` does that for every workspace. Both `--all` forms ask for confirmation unless `-y` or `-n` is set.
 
 ## Commands and exit codes
 
@@ -100,13 +98,14 @@ The last finished turn is undone immediately by `oops undo`. An older turn, or `
 | 4 | nothing to act on |
 | 130 | interrupted |
 
-`NO_COLOR`, `--color=never`, and `TERM=dumb` turn color off. `OOPS_ASCII=1`, `TERM=dumb`, and a non-UTF-8 locale use ASCII glyphs. Diffs are printed directly. `--no-pager` is accepted and does not launch a pager.
+`NO_COLOR`, `--color=never`, and `TERM=dumb` turn color off. `OOPS_ASCII=1`, `TERM=dumb`, and a non-UTF-8 locale use ASCII glyphs. A diff of 40 lines or more is sent to `$PAGER` (or `less -FRX`) when stdout is a terminal. `--no-pager` prints it directly.
 
-## What this build does not do
+## Hooks and network
 
-- It does not install a `SubagentStop` hook. A file written by a background task is covered only if it is on disk when the turn's post snapshot is taken.
-- It does not phone home. `oops version` prints the version, commit, and date compiled into the binary. `oops version --check` is not implemented.
-- It does not cosign release artifacts or attach an SBOM or SLSA provenance. Release archives are tar.gz (zip on Windows) plus `checksums.txt` (sha256).
-- It does not enforce the 2GB / 10GB caps, and it does not expire turns until you run `oops gc`.
-- Minimum tested versions of Claude Code, Codex, Gemini CLI, and Cursor CLI are not recorded. The adapters are in `internal/agents`.
-- Homebrew (`oops-cli/tap`) and the npm package (`@oops-cli/oops`) are not published. `go install github.com/lintsinghua/oops/cmd/oops@latest` and [GitHub Releases](https://github.com/lintsinghua/oops/releases) are the install paths that exist today.
+The post-turn hook writes a small job and returns. A detached `oops finish-pending` process takes the post snapshot, then runs retention. The next command, and the next turn start, wait until that job is finished, so the post snapshot is not taken after the following turn has already edited files. The pre snapshot stays synchronous.
+
+Claude Code's `SubagentStop` hook is installed. It is logged and does not open or close a turn. Files a subagent wrote are in the snapshot when they are on disk at the parent turn's post snapshot.
+
+`oops version` prints the version, commit, and date compiled into the binary. `oops version --check` is the only network call: it GETs `https://api.github.com/repos/lintsinghua/oops/releases/latest`. A 404 prints `no release published`.
+
+Release archives are tar.gz (zip on Windows) plus `checksums.txt` (sha256). `go install github.com/lintsinghua/oops/cmd/oops@latest` and [GitHub Releases](https://github.com/lintsinghua/oops/releases) are the install paths that exist today. Homebrew, npm, and a curl install script are planned.

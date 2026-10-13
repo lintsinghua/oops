@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 )
@@ -26,9 +29,123 @@ func TestHotCapturePercentiles(t *testing.T) {
 	}
 	for _, n := range []int{10_000, 100_000} {
 		p50, p95 := hotCapturePercentiles(t, n, 21)
-		fmt.Printf("OOPS_PERF files=%d samples=21 p50=%s p95=%s\n", n, p50, p95)
+		fmt.Printf("OOPS_PERF files=%d samples=21 p50=%s p95=%s goos=%s goarch=%s ncpu=%d\n", n, p50, p95, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
 		t.Logf("files=%d p50=%s p95=%s", n, p50, p95)
 	}
+}
+
+// TestHookVisibleLatency times the post-turn hook process, which queues the
+// snapshot and returns. The capture runs in a detached child. p50/p95 use the
+// same nearest-rank method as TestHotCapturePercentiles (21 samples, index 10
+// and 19). Each sample is wall time from process start to exit of
+// `oops hook claude turn-end` on an unchanged tree, after one cold turn.
+func TestHookVisibleLatency(t *testing.T) {
+	if os.Getenv("OOPS_PERF") != "1" {
+		t.Skip("set OOPS_PERF=1 to measure hook-visible latency")
+	}
+	bin := filepath.Join(t.TempDir(), "oops")
+	build := exec.Command("go", "build", "-o", bin, "./cmd/oops")
+	build.Dir = moduleRoot(t)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	for _, n := range []int{10_000, 100_000} {
+		p50, p95 := hookEndPercentiles(t, bin, n, 21)
+		fmt.Printf("OOPS_HOOK files=%d samples=21 p50=%s p95=%s goos=%s goarch=%s ncpu=%d\n", n, p50, p95, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+		t.Logf("hook files=%d p50=%s p95=%s", n, p50, p95)
+	}
+}
+
+func moduleRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found")
+		}
+		dir = parent
+	}
+}
+
+func hookEndPercentiles(t *testing.T, bin string, n, samples int) (time.Duration, time.Duration) {
+	t.Helper()
+	home := t.TempDir()
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for d := 0; d < 200; d++ {
+		if err := os.MkdirAll(filepath.Join(root, fmt.Sprintf("d%03d", d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < n; i++ {
+		dir := filepath.Join(root, fmt.Sprintf("d%03d", i%200))
+		body := fmt.Sprintf("file-%d-xxxxxxxxxxxxxxxx\n", i)
+		if err := os.WriteFile(filepath.Join(dir, fmt.Sprintf("f%05d.txt", i/200)), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := runHook(bin, home, root, "turn-start"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runHook(bin, home, root, "turn-end"); err != nil {
+		t.Fatal(err)
+	}
+	if err := waitPending(home); err != nil {
+		t.Fatal(err)
+	}
+	durs := make([]time.Duration, 0, samples)
+	for i := 0; i < samples; i++ {
+		if _, err := runHook(bin, home, root, "turn-start"); err != nil {
+			t.Fatal(err)
+		}
+		d, err := runHook(bin, home, root, "turn-end")
+		if err != nil {
+			t.Fatal(err)
+		}
+		durs = append(durs, d)
+		if err := waitPending(home); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
+	return durs[10], durs[19]
+}
+
+func runHook(bin, home, root, event string) (time.Duration, error) {
+	body := fmt.Sprintf("{\"cwd\":%q,\"session_id\":\"perf\",\"prompt\":\"x\"}", root)
+	cmd := exec.Command(bin, "--home", home, "hook", "claude", event)
+	cmd.Stdin = strings.NewReader(body)
+	start := time.Now()
+	out, err := cmd.CombinedOutput()
+	d := time.Since(start)
+	if err != nil {
+		return d, fmt.Errorf("%v %s", err, out)
+	}
+	return d, nil
+}
+
+func waitPending(home string) error {
+	deadline := time.Now().Add(3 * time.Minute)
+	for time.Now().Before(deadline) {
+		matches, err := filepath.Glob(filepath.Join(home, "workspaces", "*", "pending", "*.json"))
+		if err != nil {
+			return err
+		}
+		if len(matches) == 0 {
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return fmt.Errorf("background snapshot still pending")
 }
 
 func BenchmarkHotCapture10k(b *testing.B) {

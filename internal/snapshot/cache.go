@@ -10,6 +10,7 @@ import (
 )
 
 const cacheMagic = "OSTAT1"
+const cacheMagic2 = "OSTAT2"
 
 // CacheEntry is one stat-cache record.
 type CacheEntry struct {
@@ -22,8 +23,10 @@ type CacheEntry struct {
 }
 
 // Cache maps a comparison key to the last stat.
+// LastRoot is the tree written for this cache. A later unchanged scan reuses it.
 type Cache struct {
 	ScanTime int64
+	LastRoot store.ID
 	Entries  map[string]CacheEntry
 }
 
@@ -40,57 +43,77 @@ func LoadCache(path string) (*Cache, error) {
 	if len(b) < len(cacheMagic)+8+4 {
 		return c, nil
 	}
-	if string(b[:len(cacheMagic)]) != cacheMagic {
+	magic := string(b[:len(cacheMagic)])
+	if magic != cacheMagic && magic != cacheMagic2 {
 		return c, nil
 	}
-	r := bytes.NewReader(b[len(cacheMagic):])
-	if err := binary.Read(r, binary.LittleEndian, &c.ScanTime); err != nil {
+	p := len(cacheMagic)
+	if p+8 > len(b) {
 		return c, nil
 	}
-	var n uint32
-	if err := binary.Read(r, binary.LittleEndian, &n); err != nil {
+	c.ScanTime = int64(binary.LittleEndian.Uint64(b[p:]))
+	p += 8
+	if magic == cacheMagic2 {
+		if p+32+4 > len(b) {
+			return &Cache{Entries: map[string]CacheEntry{}}, nil
+		}
+		copy(c.LastRoot[:], b[p:p+32])
+		p += 32
+	}
+	if p+4 > len(b) {
 		return c, nil
 	}
+	n := binary.LittleEndian.Uint32(b[p:])
+	p += 4
+	c.Entries = make(map[string]CacheEntry, n)
 	for i := uint32(0); i < n; i++ {
-		var ln uint16
-		if err := binary.Read(r, binary.LittleEndian, &ln); err != nil {
+		if p+2 > len(b) {
 			return c, nil
 		}
-		key := make([]byte, ln)
-		if _, err := r.Read(key); err != nil {
+		ln := int(binary.LittleEndian.Uint16(b[p:]))
+		p += 2
+		if ln < 0 || p+ln+8+8+8+4+32+1 > len(b) {
 			return c, nil
 		}
+		key := string(b[p : p+ln])
+		p += ln
 		var e CacheEntry
-		if err := binary.Read(r, binary.LittleEndian, &e.Size); err != nil {
-			return c, nil
-		}
-		if err := binary.Read(r, binary.LittleEndian, &e.Mtime); err != nil {
-			return c, nil
-		}
-		if err := binary.Read(r, binary.LittleEndian, &e.Ino); err != nil {
-			return c, nil
-		}
-		if err := binary.Read(r, binary.LittleEndian, &e.Mode); err != nil {
-			return c, nil
-		}
-		if _, err := r.Read(e.ID[:]); err != nil {
-			return c, nil
-		}
-		k, err := r.ReadByte()
-		if err != nil {
-			return c, nil
-		}
-		e.Kind = k
-		c.Entries[string(key)] = e
+		e.Size = int64(binary.LittleEndian.Uint64(b[p:]))
+		p += 8
+		e.Mtime = int64(binary.LittleEndian.Uint64(b[p:]))
+		p += 8
+		e.Ino = binary.LittleEndian.Uint64(b[p:])
+		p += 8
+		e.Mode = binary.LittleEndian.Uint32(b[p:])
+		p += 4
+		copy(e.ID[:], b[p:p+32])
+		p += 32
+		e.Kind = b[p]
+		p++
+		c.Entries[key] = e
 	}
 	return c, nil
+}
+
+// Touch updates the stored scan time without rewriting every cache entry.
+func (c *Cache) Touch(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var buf [8]byte
+	binary.LittleEndian.PutUint64(buf[:], uint64(c.ScanTime))
+	_, err = f.WriteAt(buf[:], int64(len(cacheMagic2)))
+	return err
 }
 
 // Save writes the cache atomically.
 func (c *Cache) Save(path string) error {
 	var buf bytes.Buffer
-	buf.WriteString(cacheMagic)
+	buf.WriteString(cacheMagic2)
 	_ = binary.Write(&buf, binary.LittleEndian, c.ScanTime)
+	buf.Write(c.LastRoot[:])
 	_ = binary.Write(&buf, binary.LittleEndian, uint32(len(c.Entries)))
 	for k, e := range c.Entries {
 		if len(k) > 65535 {

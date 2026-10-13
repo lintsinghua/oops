@@ -63,7 +63,7 @@ func TestRedoRestoresUndo(t *testing.T) {
 	if _, err := e.Undo(ctx, UndoRequest{Workspace: ws}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Redo(ctx, ws); err != nil {
+	if _, err := e.Redo(ctx, ws, false); err != nil {
 		t.Fatal(err)
 	}
 	after, _ := os.ReadFile(filepath.Join(ws.Path, "a.txt"))
@@ -149,6 +149,83 @@ func mustWrite(t *testing.T, path, body string) {
 	}
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestFinishPendingKeepsTurnBytes(t *testing.T) {
+	e, ws := openTest(t)
+	ctx := context.Background()
+	mustWrite(t, filepath.Join(ws.Path, "a.txt"), "v1")
+	if _, err := e.StartTurn(ctx, TurnInput{Workspace: ws, Agent: "claude", SessionID: "s", Prompt: "edit"}); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(ws.Path, "a.txt"), "v2")
+	if err := e.QueueFinish(ws, "s", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.FinishPending(ctx, ws); err != nil {
+		t.Fatal(err)
+	}
+	got := mustRead(t, filepath.Join(ws.Path, "a.txt"))
+	if got != "v2" {
+		t.Fatalf("workspace = %q", got)
+	}
+	res, err := e.Undo(ctx, UndoRequest{Workspace: ws})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Result != "ok" {
+		t.Fatalf("undo result %s", res.Result)
+	}
+	if mustRead(t, filepath.Join(ws.Path, "a.txt")) != "v1" {
+		t.Fatalf("undo got %q", mustRead(t, filepath.Join(ws.Path, "a.txt")))
+	}
+}
+
+func TestMaintainKeepsRecentTurns(t *testing.T) {
+	e, ws := openTest(t)
+	ctx := context.Background()
+	e.Config.Retention.KeepTurns = 2
+	for i := 0; i < 4; i++ {
+		mustWrite(t, filepath.Join(ws.Path, "a.txt"), string(rune('a'+i)))
+		if _, err := e.ManualSnap(ctx, ws, "m"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.Maintain(ws); err != nil {
+		t.Fatal(err)
+	}
+	n, err := e.DB.CountTurns(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n > 2 {
+		t.Fatalf("turns = %d, want <= 2", n)
+	}
+	if n == 0 {
+		t.Fatal("maintain removed every turn")
+	}
+}
+
+func TestMaintainEnforcesByteCap(t *testing.T) {
+	e, ws := openTest(t)
+	ctx := context.Background()
+	e.Config.Retention.WorkspaceMax = "1B"
+	for i := 0; i < 3; i++ {
+		mustWrite(t, filepath.Join(ws.Path, "f"+string(rune('a'+i))+".txt"), "payload-"+string(rune('a'+i)))
+		if _, err := e.ManualSnap(ctx, ws, "m"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := e.Maintain(ws); err != nil {
+		t.Fatal(err)
+	}
+	n, err := e.DB.CountTurns(ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n > 1 {
+		t.Fatalf("turns = %d, want the newest only once over the cap", n)
 	}
 }
 

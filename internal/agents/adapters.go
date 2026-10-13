@@ -63,6 +63,7 @@ func Claude() Agent {
 				"UserPromptExpansion": {commandMatch(exe, []string{"hook", "claude", "slash"}, "oops")},
 				"Stop":                {commandAsync(exe, []string{"hook", "claude", "turn-end"})},
 				"StopFailure":         {commandAsync(exe, []string{"hook", "claude", "turn-end"})},
+				"SubagentStop":        {commandAsync(exe, []string{"hook", "claude", "subagent-stop"})},
 			}
 			if !EnsureHooks(doc, groups) && Connected(doc) {
 				return Change{Path: path, Before: prev, After: prev}, false, nil

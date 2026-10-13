@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lintsinghua/oops/internal/agents"
+	"github.com/lintsinghua/oops/internal/config"
 	"github.com/lintsinghua/oops/internal/engine"
 	"github.com/lintsinghua/oops/internal/platform"
 	"github.com/lintsinghua/oops/internal/snapshot"
@@ -116,7 +117,13 @@ func cmdDoctor(opt *options, pathExtra []string) error {
 		}
 		n, _ := e.DB.CountTurns(ws.ID)
 		stored, _ := e.Store.Size()
-		checks = append(checks, check{Name: "storage", Status: "ok", Detail: fmt.Sprintf("%s of %s · %s", ui.Size(stored), e.Config.Retention.WorkspaceMax, ui.Plural(n, "turn", "turns"))})
+		storage := check{Name: "storage", Status: "ok", Detail: fmt.Sprintf("%s of %s · %s", ui.Size(stored), e.Config.Retention.WorkspaceMax, ui.Plural(n, "turn", "turns"))}
+		if maxWS, err := config.ParseSize(e.Config.Retention.WorkspaceMax); err == nil && maxWS > 0 && stored > maxWS {
+			storage.Status = "warn"
+			storage.Fix = "oops gc"
+			storage.Detail += " · over the workspace cap"
+		}
+		checks = append(checks, storage)
 		if runtime.GOOS == "linux" {
 			if watches, err := inotifyMax(); err == nil && dirs > watches {
 				checks = append(checks, check{

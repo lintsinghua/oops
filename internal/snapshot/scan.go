@@ -33,6 +33,8 @@ type Result struct {
 	Partial  bool
 	Unstable []string
 	Cache    *Cache
+	// Changed is true when any file was not a stat-cache hit.
+	Changed bool
 }
 
 type memNode struct {
@@ -80,16 +82,19 @@ func Scan(ctx context.Context, st *store.Store, root string, opt Options) (*Resu
 	if partial {
 		fillUnvisited(opt.Prev, res)
 	}
-	id, err := writeTree(st, rootNode)
-	if err != nil {
-		return nil, err
+	if partial || res.Changed || !cacheComplete(opt.Prev, res.Cache) || opt.Prev.LastRoot.IsZero() {
+		id, err := writeTree(st, rootNode)
+		if err != nil {
+			return nil, err
+		}
+		res.Root = id
+		res.Changed = true
+	} else {
+		res.Root = opt.Prev.LastRoot
 	}
-	res.Root = id
-	flat, err := Flatten(st, id)
-	if err != nil {
-		return nil, err
-	}
-	res.Files = flat
+	res.Files = map[string]Meta{}
+	flattenNode(rootNode, "", res.Files)
+	res.Cache.LastRoot = res.Root
 	return res, nil
 }
 
@@ -134,12 +139,15 @@ func walk(ctx context.Context, st *store.Store, root, rel string, node *memNode,
 		if rel != "" {
 			childRel = rel + "/" + name
 		}
-		info, err := os.Lstat(platform.LongPath(filepath.Join(dir, name)))
-		if err != nil {
-			continue
+		mode := de.Type()
+		if mode == 0 {
+			info, err := os.Lstat(platform.LongPath(filepath.Join(dir, name)))
+			if err != nil {
+				continue
+			}
+			mode = info.Mode()
 		}
-		isDir := info.IsDir()
-		mode := info.Mode()
+		isDir := mode.IsDir()
 		if mode&os.ModeSocket != 0 || mode&os.ModeDevice != 0 || mode&os.ModeNamedPipe != 0 {
 			continue
 		}
@@ -174,7 +182,54 @@ func walk(ctx context.Context, st *store.Store, root, rel string, node *memNode,
 			dirs = append(dirs, de)
 			continue
 		}
-		jobs = append(jobs, job{name: name, info: info, path: childRel, key: platform.Key(childRel)})
+		jobs = append(jobs, job{name: name, path: childRel, key: platform.Key(childRel)})
+	}
+	if len(jobs) > 0 {
+		nworkers := workers
+		if nworkers > len(jobs) {
+			nworkers = len(jobs)
+		}
+		if nworkers < 1 {
+			nworkers = 1
+		}
+		ch := make(chan int)
+		var swg sync.WaitGroup
+		for w := 0; w < nworkers; w++ {
+			swg.Add(1)
+			go func() {
+				defer swg.Done()
+				for i := range ch {
+					info, err := os.Lstat(platform.LongPath(filepath.Join(dir, jobs[i].name)))
+					if err == nil {
+						jobs[i].info = info
+					}
+				}
+			}()
+		}
+		for i := range jobs {
+			ch <- i
+		}
+		close(ch)
+		swg.Wait()
+		kept := jobs[:0]
+		for _, j := range jobs {
+			if j.info != nil {
+				kept = append(kept, j)
+			}
+		}
+		jobs = kept
+	}
+
+	var misses []job
+	for _, j := range jobs {
+		if entry, cached, ok := reuseCached(j.info, opt, j.key); ok {
+			entry.Name = j.name
+			node.kids[j.name] = &memNode{entry: entry}
+			res.Cache.Entries[j.key] = cached
+			continue
+		}
+		res.Changed = true
+		misses = append(misses, j)
 	}
 
 	var mu sync.Mutex
@@ -182,7 +237,7 @@ func walk(ctx context.Context, st *store.Store, root, rel string, node *memNode,
 	sem := make(chan struct{}, workers)
 	var first error
 	partial := false
-	for _, j := range jobs {
+	for _, j := range misses {
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			partial = true
 			break
@@ -240,6 +295,56 @@ func walk(ctx context.Context, st *store.Store, root, rel string, node *memNode,
 		res.Cache.Entries[platform.Key(childRel)] = CacheEntry{Mtime: child.entry.Mtime, Mode: child.entry.Mode, Kind: KindDir}
 	}
 	return partial, nil
+}
+
+// reuseCached reports a stat-cache hit. The conditions match hashOne.
+func reuseCached(info os.FileInfo, opt Options, key string) (Entry, CacheEntry, bool) {
+	if opt.Prev == nil || info.Mode()&os.ModeSymlink != 0 {
+		return Entry{}, CacheEntry{}, false
+	}
+	prev, ok := opt.Prev.Entries[key]
+	if !ok || prev.ID.IsZero() {
+		return Entry{}, CacheEntry{}, false
+	}
+	mode := uint32(info.Mode().Perm())
+	mtime := info.ModTime().UnixNano()
+	racy := opt.Prev.ScanTime > 0 && mtime >= opt.Prev.ScanTime-int64(time.Second)
+	if racy || prev.Size != info.Size() || prev.Mtime != mtime || prev.Mode != mode {
+		return Entry{}, CacheEntry{}, false
+	}
+	entry := Entry{Kind: KindFile, Mode: mode, Size: info.Size(), Mtime: mtime, ID: prev.ID}
+	return entry, prev, true
+}
+
+func cacheComplete(prev, cur *Cache) bool {
+	if prev == nil || cur == nil || len(prev.Entries) != len(cur.Entries) {
+		return false
+	}
+	for k := range prev.Entries {
+		if _, ok := cur.Entries[k]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func flattenNode(n *memNode, prefix string, out map[string]Meta) {
+	names := make([]string, 0, len(n.kids))
+	for name := range n.kids {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		ch := n.kids[name]
+		p := name
+		if prefix != "" {
+			p = prefix + "/" + name
+		}
+		out[p] = metaFrom(p, ch.entry)
+		if ch.entry.Kind == KindDir {
+			flattenNode(ch, p, out)
+		}
+	}
 }
 
 func hashOne(st *store.Store, root, rel string, info os.FileInfo, opt Options) (Entry, CacheEntry, bool, bool, error) {

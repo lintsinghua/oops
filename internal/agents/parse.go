@@ -57,6 +57,8 @@ func normalizeKind(agent, kind string) string {
 		return "session"
 	case "step", "beforeshellexecution", "afterfileedit", "beforetool":
 		return "step"
+	case "subagent-stop", "subagentstop":
+		return "subagent"
 	default:
 		return k
 	}

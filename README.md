@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/lintsinghua/oops/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/lintsinghua/oops/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/lintsinghua/oops/releases"><img alt="Release" src="https://img.shields.io/github/v/release/lintsinghua/oops?color=F5A524&label=release"></a>
+  <a href="https://github.com/lintsinghua/oops/releases"><img alt="Release" src="https://img.shields.io/github/v/release/lintsinghua/oops?color=000000&label=release"></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-8B949E"></a>
   <a href="https://goreportcard.com/report/github.com/lintsinghua/oops"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/lintsinghua/oops"></a>
 </p>
@@ -29,8 +29,6 @@
 go install github.com/lintsinghua/oops/cmd/oops@latest
 oops init                         # connect your agents once — then forget about it
 ```
-
-Homebrew (`oops-cli/tap`), npm (`@oops-cli/oops`), and a curl install script are not available yet.
 
 ---
 
@@ -53,12 +51,9 @@ oops works one level lower, at the file system. Whatever the agent used — its 
 | | |
 |---|---|
 | Go | `go install github.com/lintsinghua/oops/cmd/oops@latest` |
-| Binaries | [GitHub Releases](https://github.com/lintsinghua/oops/releases) — macOS, Linux, Windows · amd64 / arm64 |
-| Homebrew | Coming soon. The `oops-cli/tap` name is not registered. |
-| npm | Coming soon. The `@oops-cli/oops` package is not registered. |
-| Install script | Coming soon. There is no curl installer. |
+| Releases | [GitHub Releases](https://github.com/lintsinghua/oops/releases) — macOS, Linux, Windows · amd64 / arm64 |
 
-GitHub Release archives are tar.gz (zip on Windows) plus `checksums.txt` (sha256). The current GoReleaser config does not cosign-sign artifacts or attach an SBOM or SLSA provenance. Scoop and winget manifests are not published.
+Homebrew, npm and an install script are coming soon.
 
 ## 30-second start
 
@@ -128,7 +123,7 @@ You only need to remember `oops`. The rest are shortcuts for people who know wha
 | `oops doctor` | Check that everything works |
 | `oops gc` | Free up snapshot storage |
 
-`undo`, `rewind`, `restore`, and `gc` accept `-n/--dry-run`. `redo` and `snap` do not. `list`, `show`, `diff`, a completed `undo`, `doctor`, `snap`, and `gc` accept `--json` (with a `schema_version`). `undo -n --json` still prints the text preview, and `show --json` is turn metadata rather than the file list. Exit codes: `0` ok · `1` error · `2` needs confirmation · `3` partial (conflicting files kept) · `4` nothing to act on · `130` interrupted.
+`undo`, `rewind`, `redo`, `restore`, `snap`, and `gc` accept `-n/--dry-run`. `list`, `show`, `diff`, `undo -n`, `doctor`, `snap`, and `gc` accept `--json` (with a `schema_version`). `show --json` includes the file list. Exit codes: `0` ok · `1` error · `2` needs confirmation · `3` partial (conflicting files kept) · `4` nothing to act on · `130` interrupted. The shapes are in [docs/schema.md](docs/schema.md).
 
 ## Supported agents
 
@@ -143,8 +138,6 @@ You only need to remember `oops`. The rest are shortcuts for people who know wha
 
 `oops init --project` writes project-level config (e.g. `.claude/settings.json`) so a whole team gets it from the repo.
 
-Minimum tested versions for each agent are not recorded yet. The adapters follow the hook docs linked from the code in `internal/agents`.
-
 Planned for v0.2: GitHub Copilot CLI, opencode, Qwen Code, Amp, Goose. [Request an agent →](https://github.com/lintsinghua/oops/issues/new/choose)
 
 ## How it works
@@ -152,7 +145,7 @@ Planned for v0.2: GitHub Copilot CLI, opencode, Qwen Code, Amp, Goose. [Request 
 ```
  agent turn starts ──► oops hook ──► snapshot "pre"
          … agent edits, runs sed, rm -rf, git clean …
- agent turn ends   ──► oops hook ──► snapshot "post"
+ agent turn ends   ──► oops hook returns ──► snapshot "post" finishes in the background
 
  oops undo  ──►  for each file the turn changed:
                    still as the agent left it?  → put back the "pre" version
@@ -163,8 +156,8 @@ Planned for v0.2: GitHub Copilot CLI, opencode, Qwen Code, Amp, Goose. [Request 
 - **Incremental and content-addressed.** A stat cache means only changed files are read and hashed. Contents are deduplicated, zstd-compressed and immutable — the model is git's (blobs, trees), the storage is not.
 - **Your edits are safe.** Undo compares three states per file: before the turn, after the turn, and now. Anything you (or another agent) changed afterwards is kept and reported, not overwritten. `--force` overrides, and the overwritten version is saved first.
 - **Undo is undoable.** Every undo, rewind and restore takes a safety snapshot first, so `oops redo` always gets you back.
-- **Not in your way.** Hook processes always exit 0, and there is no daemon. They write to stdout only to answer `/oops`, or, on Claude Code, to pass a `systemMessage` when a snapshot was partial or a file was too large to store. A hard timeout (default 10s, measured from the start of that scan) marks a snapshot partial rather than blocking the agent. The next `oops` command prints the same notice.
-- **Not in your repo.** Snapshot data is never written inside the workspace. oops does not write to `.git`, create branches, or stash. `oops init --project` is the exception: it writes the agent's own project config, such as `.claude/settings.json`. Snapshots live in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). `OOPS_HOME` overrides the data directory. macOS uses the same `~/.local/share/oops` path.
+- **Not in your way.** Hook processes always exit 0, and there is no daemon. The post-turn hook records the job and returns; a detached process stores the snapshot and then applies retention. The next turn waits for that snapshot, so the boundary stays intact. Hooks write to stdout only to answer `/oops`, or, on Claude Code, to pass a `systemMessage` when a snapshot was partial or a file was too large to store. A hard timeout (default 10s, measured from the start of that scan) marks a snapshot partial rather than blocking the agent. The next `oops` command prints the same notice.
+- **Not in your repo.** Snapshot data is never written inside the workspace. oops does not write to `.git`, create branches, or stash. `oops init --project` is the exception: it writes the agent's own project config, such as `.claude/settings.json`. Snapshots live in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). `OOPS_HOME` overrides the data directory.
 - **What's included.** Files that are not gitignored, including untracked files, plus protected files even when gitignored (`.env`, `.env.*`, `.envrc`, `*.local`, `*.local.*`, `.dev.vars`, `local.settings.json`). A gitignored path is skipped even if it was force-added. Heavy directories (`node_modules/`, `.venv/`, `target/`, …) are skipped. `dist/` and `build/` are skipped only when a gitignore rule also matches. Tune it with a `.oopsignore` (gitignore syntax). Files over 50 MB are recorded but not stored. `oops doctor`, `oops show`, and the next command say they are unprotected.
 
 Full details: [docs/how-it-works.md](docs/how-it-works.md)
@@ -182,30 +175,32 @@ oops doesn't replace your agent's checkpoints — it covers what they miss. Use 
 | Keeps your own edits made after the turn | — | — | ✗ (whole-repo restore + clean) | ✓ |
 | One timeline across agents | ✗ | ✗ | ✗ | ✓ |
 | Independent of the agent session | ✗ (per session) | — | — | ✓ |
-| History kept | 100 checkpoints / session, ~30 days | — | — | 500 turns or 30 days when you run `oops gc` |
+| History kept | 100 checkpoints / session, ~30 days | — | — | 500 turns or 30 days |
 | Rewinds the conversation | ✓ | — | ✓ | ✗ (not a goal) |
 
-<sub>✓ yes · ✗ no · — not applicable or not documented. Sources: [Claude Code checkpointing docs](https://code.claude.com/docs/en/checkpointing), [openai/codex PR #19481](https://github.com/openai/codex/pull/19481). The other-tool cells were written 2026-10-14 and were not re-checked for this change. There is still no Gemini CLI checkpointing doc link. oops does not install a SubagentStop hook; a file is covered when it is on disk at the turn's post snapshot. The 2 GB and 10 GB retention settings are shown by `oops doctor` and are not enforced.</sub>
+<sub>✓ yes · ✗ no · — not applicable or not documented. Sources: [Claude Code checkpointing docs](https://code.claude.com/docs/en/checkpointing), [openai/codex PR #19481](https://github.com/openai/codex/pull/19481), [Gemini CLI checkpointing](https://geminicli.com/docs/cli/checkpointing/). Claude Code `SubagentStop` is recorded and does not split the turn. A file is covered when it is on disk at the parent turn's post snapshot.</sub>
 
 ## FAQ
 
 <details>
 <summary><strong>Will it slow down my agent?</strong></summary>
 
-It's built not to. Codex's previous `/undo` was removed partly because its snapshots caused problems for users, so this is oops's first rule. Snapshots are incremental (only files whose size, mtime, or mode changed are re-read), excluded directories are pruned without being walked, and each snapshot has a hard timeout (default 10s) after which it is marked partial and the agent carries on. `oops doctor` reports hook status, workspace size, and files that were too large to store. It does not yet show how long the last snapshot took.
+It's built not to. Codex's previous `/undo` was removed partly because its snapshots caused problems for users, so this is oops's first rule. Snapshots are incremental (only files whose size, mtime, or mode changed are re-read), excluded directories are pruned without being walked, and each snapshot has a hard timeout (default 10s) after which it is marked partial and the agent carries on. The post-turn hook returns as soon as the snapshot is queued. A detached process stores it, and the next turn waits so the boundary stays correct.
 
-Hot captures were measured on 2026-10-13 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHotCapturePercentiles ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. One cold `Capture` fills the stat cache, then 21 hot `Capture` calls time an unchanged tree. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank). This is in-process capture (stat walk, cache reuse, tree write, SQLite insert), not process startup. Machine: 4 vCPU Intel Xeon, Linux 6.12.94+ x86_64.
+Measured on 2026-10-13 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run 'TestHotCapturePercentiles|TestHookVisibleLatency' ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. The table is `TestHookVisibleLatency`: build `./cmd/oops`, take one cold turn, then time 21 `oops hook claude turn-end` processes from start to exit. That process writes a job and returns; the capture runs in a child. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank). Machine: 4 vCPU, Linux 6.12.94+ x86_64.
 
-| Files | p50 | p95 |
+| Files | Hook p50 | Hook p95 |
 |---:|---:|---:|
-| 10,000 | 98.473505ms | 108.303065ms |
-| 100,000 | 946.033015ms | 4.083672579s |
+| 10,000 | 4 ms | 5 ms |
+| 100,000 | 5 ms | 6 ms |
+
+The same run's in-process hot `Capture` (`TestHotCapturePercentiles`: one cold capture, then 21 unchanged captures, stat walk, cache reuse, tree write, SQLite insert) was 86 ms / 93 ms at 10,000 files and 0.87 s / 3.6 s at 100,000 files (p50 / p95). The next turn's start hook waits until that background snapshot is stored.
 </details>
 
 <details>
 <summary><strong>What does it store, and where?</strong></summary>
 
-File contents of your workspace (deduplicated and compressed), plus a small SQLite database with turn metadata: agent, time, files changed, and the first line of your prompt (max 200 characters stored, common secrets redacted; set `privacy.record_prompts = false` to turn it off). Everything stays in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). On Unix, new data directories are `0700` and object files are `0600`. On Windows, the data directory gets an ACL for the current user. Defaults in config: last 500 turns or 30 days, 2 GB per workspace, 10 GB total. Those turn and day limits apply when you run `oops gc`; they are not applied on their own. The byte caps are displayed by `oops doctor` and are not enforced. `oops gc` drops expired turns in the current workspace. `oops gc --all` deletes that workspace's snapshots. `oops gc --all --global` deletes every workspace. Unreferenced objects newer than one hour are left in place.
+File contents of your workspace (deduplicated and compressed), plus a small SQLite database with turn metadata: agent, time, files changed, and the first line of your prompt (max 200 characters stored, common secrets redacted; set `privacy.record_prompts = false` to turn it off). Everything stays in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). On Unix, new data directories are `0700` and object files are `0600`. On Windows, the data directory gets an ACL for the current user. After each post snapshot, retention keeps the last 500 turns or 30 days, and drops the oldest turns past 2 GB per workspace or 10 GB overall. `oops gc` does the same expiry on demand. `oops gc --all` deletes that workspace's snapshots. `oops gc --all --global` deletes every workspace. Unreferenced objects newer than one hour are left in place.
 </details>
 
 <details>
@@ -241,19 +236,19 @@ oops keeps your version and tells you which files it skipped and why (exit code 
 <details>
 <summary><strong>Does it send anything over the network?</strong></summary>
 
-No. The commands do not phone home. There is no telemetry, no update check, and no account. `oops version` only prints the version, commit, and build date that were compiled in. `oops version --check` is not implemented.
+The commands do not phone home. There is no telemetry and no account. `oops version` prints the version, commit, and build date that were compiled in. `oops version --check` is the only network call: it reads the latest GitHub release.
 </details>
 
 <details>
 <summary><strong>Windows?</strong></summary>
 
-The same `go test -race ./...` job runs on Linux, macOS, and Windows in CI. Long paths, case-only renames, and files locked by another program are handled in the restore code. They are not yet covered by one shared end-to-end scenario suite on all three systems.
+The same `go test -race ./...` job runs on Linux, macOS, and Windows in CI, including the shared end-to-end scenarios (delete, edit, rename, mode, symlink, Unicode names, empty directories, `.env`, large files, dry-run JSON).
 </details>
 
 <details>
 <summary><strong>How do I uninstall?</strong></summary>
 
-`oops init --undo` removes the hooks (your other settings stay untouched), `oops gc --all --global` deletes the snapshots, then remove the binary with your package manager.
+`oops init --undo` removes the hooks (your other settings stay untouched), `oops gc --all --global` deletes the snapshots, then delete `$(go env GOPATH)/bin/oops`.
 </details>
 
 ## Contributing

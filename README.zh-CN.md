@@ -12,7 +12,7 @@
 
 <p align="center">
   <a href="https://github.com/lintsinghua/oops/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/lintsinghua/oops/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://github.com/lintsinghua/oops/releases"><img alt="Release" src="https://img.shields.io/github/v/release/lintsinghua/oops?color=F5A524&label=release"></a>
+  <a href="https://github.com/lintsinghua/oops/releases"><img alt="Release" src="https://img.shields.io/github/v/release/lintsinghua/oops?color=000000&label=release"></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-8B949E"></a>
   <a href="https://goreportcard.com/report/github.com/lintsinghua/oops"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/lintsinghua/oops"></a>
 </p>
@@ -29,8 +29,6 @@
 go install github.com/lintsinghua/oops/cmd/oops@latest
 oops init                         # 一次接好本机所有 Agent，之后就不用管了
 ```
-
-Homebrew（`oops-cli/tap`）、npm（`@oops-cli/oops`）和 curl 安装脚本都还没有。
 
 ---
 
@@ -53,12 +51,9 @@ oops 工作在更底层的文件系统。不管 Agent 用的是自带的 Edit �
 | | |
 |---|---|
 | Go | `go install github.com/lintsinghua/oops/cmd/oops@latest` |
-| 二进制 | [GitHub Releases](https://github.com/lintsinghua/oops/releases)：macOS、Linux、Windows · amd64 / arm64 |
-| Homebrew | 即将提供。`oops-cli/tap` 这个名字还没注册。 |
-| npm | 即将提供。`@oops-cli/oops` 这个包还没注册。 |
-| 安装脚本 | 即将提供。现在没有 curl 安装脚本。 |
+| Releases | [GitHub Releases](https://github.com/lintsinghua/oops/releases)：macOS、Linux、Windows · amd64 / arm64 |
 
-GitHub Release 的产物是 tar.gz（Windows 为 zip）和 `checksums.txt`（sha256）。当前 GoReleaser 配置不会做 cosign 签名，也不附带 SBOM 或 SLSA provenance。Scoop 和 winget 清单都还没有发布。
+Homebrew、npm 和安装脚本即将提供。
 
 ## 30 秒上手
 
@@ -128,7 +123,7 @@ $ oops undo
 | `oops doctor` | 检查一切是否正常 |
 | `oops gc` | 回收快照占用的空间 |
 
-`undo`、`rewind`、`restore`、`gc` 支持 `-n/--dry-run`。`redo` 和 `snap` 不支持。`list`、`show`、`diff`、已经执行的 `undo`、`doctor`、`snap`、`gc` 支持 `--json`（带 `schema_version`）。`undo -n --json` 仍然打印文本预览，`show --json` 是这一轮的元数据，不是文件列表。退出码：`0` 成功 · `1` 错误 · `2` 需要确认 · `3` 部分完成（冲突文件被保留）· `4` 没有可操作的目标 · `130` 被中断。
+`undo`、`rewind`、`redo`、`restore`、`snap`、`gc` 支持 `-n/--dry-run`。`list`、`show`、`diff`、`undo -n`、`doctor`、`snap`、`gc` 支持 `--json`（带 `schema_version`）。`show --json` 包含文件列表。退出码：`0` 成功 · `1` 错误 · `2` 需要确认 · `3` 部分完成（冲突文件被保留）· `4` 没有可操作的目标 · `130` 被中断。字段见 [docs/schema.md](docs/schema.md)。
 
 ## 支持的 Agent
 
@@ -143,8 +138,6 @@ $ oops undo
 
 `oops init --project` 会写入项目级配置（如 `.claude/settings.json`），团队成员拉下仓库即可共享。
 
-每个 Agent 经过测试的最低版本还没有记录。适配器写在 `internal/agents`，事件名以各家 hook 文档为准。
-
 v0.2 计划支持：GitHub Copilot CLI、opencode、Qwen Code、Amp、Goose。[申请支持新的 Agent →](https://github.com/lintsinghua/oops/issues/new/choose)
 
 ## 工作原理
@@ -152,7 +145,7 @@ v0.2 计划支持：GitHub Copilot CLI、opencode、Qwen Code、Amp、Goose。[�
 ```
  Agent 一轮开始 ──► oops hook ──► 快照 "pre"
         … Agent 编辑文件、跑 sed、rm -rf、git clean …
- Agent 一轮结束 ──► oops hook ──► 快照 "post"
+ Agent 一轮结束 ──► oops hook 立刻返回 ──► 快照 "post" 在后台完成
 
  oops undo ──► 对这一轮改过的每个文件：
                  还是 Agent 留下的样子？      → 还原成 "pre" 版本
@@ -163,8 +156,8 @@ v0.2 计划支持：GitHub Copilot CLI、opencode、Qwen Code、Amp、Goose。[�
 - **增量、内容寻址**。借助 stat 缓存，只读取和哈希有变化的文件。内容去重、zstd 压缩、不可变——数据模型借鉴 git（blob、tree），但不使用 git 存储。
 - **你的改动是安全的**。撤销时对每个文件比较三个状态：轮前、轮后、现在。这一轮之后被你（或别的 Agent）改过的文件会被保留并列出，不会被覆盖。`--force` 可以强制覆盖，被覆盖的版本会先保存下来。
 - **撤销也能撤销**。每次 undo、rewind、restore 之前都先拍一张安全快照，`oops redo` 一定能回到原样。
-- **不打扰**。hook 进程永远 exit 0，没有常驻进程。它们只在回答 `/oops` 时写 stdout；Claude Code 上，快照不完整或有文件大到没存下内容时，还会输出一条 `systemMessage`。硬超时默认 10 秒，从这次扫描开始计时，超时只把快照标成 partial，不阻塞 Agent。下一次 `oops` 命令也会打印同一条提示。
-- **不碰你的仓库**。快照数据不会写进工作区。不写 `.git`，不建分支，不 stash。例外是 `oops init --project`：它会写入 Agent 自己的项目配置，例如 `.claude/settings.json`。快照在 `~/.local/share/oops`（Windows 为 `%LOCALAPPDATA%\oops`）。`OOPS_HOME` 可以改数据目录。macOS 用的也是 `~/.local/share/oops`。
+- **不打扰**。hook 进程永远 exit 0，没有常驻进程。轮次结束的 hook 记下任务后立刻返回，由脱离的进程写入快照并做保留清理。下一轮会等这张快照完成，轮次边界不会错。hook 只在回答 `/oops` 时写 stdout；Claude Code 上，快照不完整或有文件大到没存下内容时，还会输出一条 `systemMessage`。硬超时默认 10 秒，从这次扫描开始计时，超时只把快照标成 partial，不阻塞 Agent。下一次 `oops` 命令也会打印同一条提示。
+- **不碰你的仓库**。快照数据不会写进工作区。不写 `.git`，不建分支，不 stash。例外是 `oops init --project`：它会写入 Agent 自己的项目配置，例如 `.claude/settings.json`。快照在 `~/.local/share/oops`（Windows 为 `%LOCALAPPDATA%\oops`）。`OOPS_HOME` 可以改数据目录。
 - **收录范围**。没被 gitignore 的文件（含未跟踪文件），再加上即使被 gitignore 也受保护的文件（`.env`、`.env.*`、`.envrc`、`*.local`、`*.local.*`、`.dev.vars`、`local.settings.json`）。被 gitignore 的路径即使曾经 `git add -f` 也会跳过。`node_modules/`、`.venv/`、`target/` 等重目录自动跳过。`dist/` 和 `build/` 只在同时命中 gitignore 规则时跳过。可用 `.oopsignore`（gitignore 语法）调整。超过 50 MB 的文件只记录元数据不存内容。`oops doctor`、`oops show` 和下一条命令会说明它们未受保护。
 
 详见 [docs/how-it-works.md](docs/how-it-works.md)
@@ -182,30 +175,32 @@ oops 不取代 Agent 自带的检查点，而是补上它们覆盖不到的地�
 | 保留你在这一轮之后的改动 | — | — | ✗（整库 restore + clean） | ✓ |
 | 跨 Agent 的统一时间线 | ✗ | ✗ | ✗ | ✓ |
 | 独立于 Agent 会话 | ✗（按会话） | — | — | ✓ |
-| 历史保留 | 每会话 100 个，约 30 天 | — | — | 运行 `oops gc` 时按 500 轮或 30 天 |
+| 历史保留 | 每会话 100 个，约 30 天 | — | — | 500 轮或 30 天 |
 | 回滚对话 | ✓ | — | ✓ | ✗（不在目标内） |
 
-<sub>✓ 支持 · ✗ 不支持 · — 不适用或文档未说明。来源：[Claude Code 检查点文档](https://code.claude.com/docs/en/checkpointing)、[openai/codex PR #19481](https://github.com/openai/codex/pull/19481)。其他工具那几列写于 2026-10-14，这次没有逐格复核，也没有补上 Gemini CLI 检查点文档链接。oops 不安装 SubagentStop hook；文件要在这一轮的 post 快照时已经在磁盘上，才会被覆盖到。2 GB 和 10 GB 的保留设置会在 `oops doctor` 里显示，但不会强制执行。</sub>
+<sub>✓ 支持 · ✗ 不支持 · — 不适用或文档未说明。来源：[Claude Code 检查点文档](https://code.claude.com/docs/en/checkpointing)、[openai/codex PR #19481](https://github.com/openai/codex/pull/19481)、[Gemini CLI 检查点](https://geminicli.com/docs/cli/checkpointing/)。Claude Code 的 `SubagentStop` 会被记录，且不会把这一轮拆开。文件要在父轮的 post 快照时已经在磁盘上，才会被覆盖到。</sub>
 
 ## FAQ
 
 <details>
 <summary><strong>会拖慢 Agent 吗？</strong></summary>
 
-oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因之一就是快照给用户带来了问题，所以这是 oops 的第一条规矩：快照是增量的（只重读 size、mtime 或 mode 变化的文件），被排除的目录直接剪掉不遍历，每次快照有硬超时（默认 10 秒）——超时后快照标记为 partial，Agent 照常继续。`oops doctor` 会报告 hook 状态、工作区规模，以及大到没存下内容的文件。它目前不会显示上一次快照的耗时。
+oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因之一就是快照给用户带来了问题，所以这是 oops 的第一条规矩：快照是增量的（只重读 size、mtime 或 mode 变化的文件），被排除的目录直接剪掉不遍历，每次快照有硬超时（默认 10 秒）——超时后快照标记为 partial，Agent 照常继续。轮次结束的 hook 在快照入队后立刻返回。脱离的进程负责写入，下一轮会等它写完，轮次边界保持正确。
 
-热快照于 2026-10-13 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHotCapturePercentiles ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。一次冷 `Capture` 填满 stat 缓存，然后对未改动的树做 21 次热 `Capture`。p50 是排序后的第 11 个样本，p95 是第 20 个（nearest-rank）。测的是进程内的 Capture（stat 遍历、缓存复用、tree 写入、SQLite 插入），不含进程启动。机器：4 vCPU Intel Xeon，Linux 6.12.94+ x86_64。
+2026-10-13 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run 'TestHotCapturePercentiles|TestHookVisibleLatency' ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。下表是 `TestHookVisibleLatency`：编译 `./cmd/oops`，先走一轮冷启动，再计时 21 次 `oops hook claude turn-end` 从进程启动到退出。该进程只写入任务后返回，快照在子进程里完成。p50 是排序后的第 11 个样本，p95 是第 20 个（nearest-rank）。机器：4 vCPU，Linux 6.12.94+ x86_64。
 
-| 文件数 | p50 | p95 |
+| 文件数 | Hook p50 | Hook p95 |
 |---:|---:|---:|
-| 10,000 | 98.473505ms | 108.303065ms |
-| 100,000 | 946.033015ms | 4.083672579s |
+| 10,000 | 4 ms | 5 ms |
+| 100,000 | 5 ms | 6 ms |
+
+同一次运行里，进程内热 `Capture`（`TestHotCapturePercentiles`：一次冷 Capture，然后 21 次未改动的 Capture，含 stat 遍历、缓存复用、tree 写入、SQLite 插入）在 10,000 个文件时是 86 ms / 93 ms，在 100,000 个文件时是 0.87 s / 3.6 s（p50 / p95）。下一轮的 start hook 会等到这张后台快照落盘。
 </details>
 
 <details>
 <summary><strong>存了什么？存在哪里？</strong></summary>
 
-工作区的文件内容（去重并压缩），以及一个小型 SQLite 数据库，记录每一轮的元数据：Agent、时间、改动的文件、prompt 的首行（最多存 200 字符，常见密钥会被脱敏；设置 `privacy.record_prompts = false` 可完全关闭）。数据在 `~/.local/share/oops`（Windows 是 `%LOCALAPPDATA%\oops`）。Unix 上新建的数据目录是 `0700`，对象文件是 `0600`。Windows 上数据目录会设成只给当前用户的 ACL。配置里的默认值是最近 500 轮或 30 天，单个工作区 2 GB、总计 10 GB。轮数和天数只在你运行 `oops gc` 时生效，不会自动清理。字节上限会在 `oops doctor` 里显示，但不会强制执行。`oops gc` 清理当前工作区里过期的轮。`oops gc --all` 删除当前工作区的快照。`oops gc --all --global` 删除所有工作区。一小时内新建、且已无引用的对象会先留着。
+工作区的文件内容（去重并压缩），以及一个小型 SQLite 数据库，记录每一轮的元数据：Agent、时间、改动的文件、prompt 的首行（最多存 200 字符，常见密钥会被脱敏；设置 `privacy.record_prompts = false` 可完全关闭）。数据在 `~/.local/share/oops`（Windows 是 `%LOCALAPPDATA%\oops`）。Unix 上新建的数据目录是 `0700`，对象文件是 `0600`。Windows 上数据目录会设成只给当前用户的 ACL。每张 post 快照之后会自动保留最近 500 轮或 30 天，并在单个工作区超过 2 GB 或全局超过 10 GB 时删掉最旧的轮。`oops gc` 可以手动做同样的清理。`oops gc --all` 删除当前工作区的快照。`oops gc --all --global` 删除所有工作区。一小时内新建、且已无引用的对象会先留着。
 </details>
 
 <details>
@@ -241,19 +236,19 @@ oops 会保留你的版本，并告诉你跳过了哪些文件、为什么（退
 <details>
 <summary><strong>会联网吗？</strong></summary>
 
-不会。这些命令不会主动联网。没有遥测，没有更新检查，没有账号。`oops version` 只打印编译进去的版本、提交和构建日期。`oops version --check` 没有实现。
+这些命令不会主动联网。没有遥测，也没有账号。`oops version` 只打印编译进去的版本、提交和构建日期。唯一的网络请求是 `oops version --check`，它读取 GitHub 上的最新 release。
 </details>
 
 <details>
 <summary><strong>支持 Windows 吗？</strong></summary>
 
-CI 在 Linux、macOS、Windows 上跑同一条 `go test -race ./...`。长路径、仅大小写不同的重命名、以及被其他程序占用的文件，恢复代码里有处理。这三项还没有放进三平台共用的端到端场景测试。
+CI 在 Linux、macOS、Windows 上跑同一条 `go test -race ./...`，其中包含共用的端到端场景（删除、修改、重命名、权限、符号链接、Unicode 文件名、空目录、`.env`、大文件、dry-run JSON）。
 </details>
 
 <details>
 <summary><strong>怎么卸载？</strong></summary>
 
-`oops init --undo` 移除 hooks（其他设置不受影响），`oops gc --all --global` 删除所有快照，然后用包管理器删除二进制即可。
+`oops init --undo` 移除 hooks（其他设置不受影响），`oops gc --all --global` 删除所有快照，然后删除 `$(go env GOPATH)/bin/oops`。
 </details>
 
 ## 参与贡献
