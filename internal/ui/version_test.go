@@ -22,6 +22,11 @@ func TestVersionModelView(t *testing.T) {
 	if !strings.HasSuffix(got, "\n") {
 		t.Errorf("View() = %q, want a trailing newline", got)
 	}
+	for _, line := range strings.Split(strings.TrimSuffix(got, "\n"), "\n") {
+		if strings.TrimRight(line, " ") != line {
+			t.Errorf("line %q has trailing spaces", line)
+		}
+	}
 }
 
 func TestVersionModelQuits(t *testing.T) {
