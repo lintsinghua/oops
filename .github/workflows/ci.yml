@@ -148,9 +148,10 @@ jobs:
         if: matrix.fs == 'ntfs'
         shell: pwsh
         run: |
-          $root = [System.IO.Path]::GetPathRoot($env:GITHUB_WORKSPACE)
-          $out = fsutil fsinfo volumeinfo $root | Out-String
-          Write-Host "root=$root"
+          # fsutil rejects both a nested path and a root with a trailing slash.
+          $drive = (Get-Item -LiteralPath $env:GITHUB_WORKSPACE).PSDrive.Name
+          $out = fsutil fsinfo volumeinfo "${drive}:" | Out-String
+          Write-Host "drive=${drive}:"
           Write-Host $out
           if ($out -notmatch 'NTFS') { exit 1 }
 
