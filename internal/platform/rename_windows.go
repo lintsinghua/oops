@@ -15,14 +15,14 @@ func IsBusy(err error) bool {
 	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_LOCK_VIOLATION)
 }
 
-func renameReplace(src, dst string) error {
+func renameReplace(src, dst string, sync bool) error {
 	backoffs := []time.Duration{0, 50 * time.Millisecond, 150 * time.Millisecond, 400 * time.Millisecond}
 	var err error
 	for i, wait := range backoffs {
 		if wait > 0 {
 			time.Sleep(wait)
 		}
-		err = moveFile(src, dst)
+		err = moveFile(src, dst, sync)
 		if err == nil {
 			return nil
 		}
@@ -33,7 +33,7 @@ func renameReplace(src, dst string) error {
 	return err
 }
 
-func moveFile(src, dst string) error {
+func moveFile(src, dst string, sync bool) error {
 	from, err := windows.UTF16PtrFromString(LongPath(src))
 	if err != nil {
 		return err
@@ -42,7 +42,13 @@ func moveFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	err = windows.MoveFileEx(from, to, windows.MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH)
+	// WRITE_THROUGH flushes each rename. A 1,000-file undo uses the unsynced
+	// path and flushes the directory once at the end of the batch.
+	flags := uint32(windows.MOVEFILE_REPLACE_EXISTING)
+	if sync {
+		flags |= windows.MOVEFILE_WRITE_THROUGH
+	}
+	err = windows.MoveFileEx(from, to, flags)
 	if err == nil {
 		return nil
 	}
