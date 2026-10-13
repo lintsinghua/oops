@@ -1,0 +1,46 @@
+version: 2
+
+project_name: oops
+
+builds:
+  - id: oops
+    main: ./cmd/oops
+    binary: oops
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/lintsinghua/oops/internal/version.Version={{ .Version }}
+      - -X github.com/lintsinghua/oops/internal/version.Commit={{ .Commit }}
+      - -X github.com/lintsinghua/oops/internal/version.Date={{ .CommitDate }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: oops
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - src: LICENSE
+      - src: README.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+
+release:
+  prerelease: auto

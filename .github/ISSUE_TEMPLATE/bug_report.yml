@@ -1,0 +1,38 @@
+name: Bug report
+description: Report a defect in the oops tool or its build
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Product behavior is still being specified; use this form for defects in the tool, build, or repository tooling.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `oops version`, or the commit you built.
+      placeholder: dev
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, architecture, and how you installed or built the binary.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output
+      description: Relevant command output. Trim secrets before pasting.
+      render: text
+    validations:
+      required: false

@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a change to oops
+title: "request: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Product requirements are still being written. A request here is a proposal, not a commitment.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is difficult or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What change would help, and who is it for?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other approaches you considered.
+    validations:
+      required: false
