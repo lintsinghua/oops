@@ -161,6 +161,9 @@ func (e *Engine) Capture(ctx context.Context, ws Workspace, opt SnapOptions) (me
 	} else if err := res.Cache.Save(cachePath); err != nil {
 		return meta.Snapshot{}, nil, err
 	}
+	if err := e.Store.Sync(); err != nil {
+		return meta.Snapshot{}, nil, err
+	}
 	id, err := newID()
 	if err != nil {
 		return meta.Snapshot{}, nil, err

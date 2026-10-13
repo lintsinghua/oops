@@ -212,7 +212,7 @@ Measured on 2026-10-13 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run 'Tes
 
 On this run the in-process 100k Capture p95 is 3.5 s and the turn-start hook p95 is 0.92 s. Both are nearest-rank on 21 samples from the same machine and day. If the previous post snapshot is still running, the turn-start hook waits for it first, bounded at 30 seconds (`TestWaitPendingBounded`). When the job is already finished, that extra wait is under 50 ms. A dead background process does not drop the turn: the job file stays until a later command stores the post snapshot (`TestCrashedChildFinishesTurn`).
 
-**Cold start and memory while scanning.** `TestColdStart10k` times the first in-process Capture of 10,000 files totaling 300,000,000 bytes. On this machine that took 2.53 s (the limit in the PRD is 3 s on Linux). `TestScanRSS100k` sampled VmRSS during a scan of 100,000 files and peaked at 68.3 MiB, 71,663,616 bytes (the limit in the PRD is 150 MB). Same machine and day. These two figures are one sample each, not a percentile.
+**Cold start and memory while scanning.** `TestColdStart10k` times the first in-process Capture of 10,000 files totaling 300,000,000 bytes. On this machine that took 0.69 s (the limit in the PRD is 3 s on Linux). `TestScanRSS100k` sampled VmRSS during a scan of 100,000 files and peaked at 119.5 MiB, 125,341,696 bytes (the limit in the PRD is 150 MB). Same machine and day. These two figures are one sample each, not a percentile.
 </details>
 
 <details>

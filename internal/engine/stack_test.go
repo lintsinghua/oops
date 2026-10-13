@@ -276,9 +276,17 @@ func TestUndoThousandFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The PRD limits are wall-clock without the race detector. CI runs -race,
+	// which inflates this, so the race build only guards against a hang.
 	limit := time.Second
 	if runtime.GOOS == "windows" {
 		limit = 2 * time.Second
+	}
+	if raceEnabled {
+		limit = 15 * time.Second
+		if runtime.GOOS == "windows" {
+			limit = 45 * time.Second
+		}
 	}
 	t.Logf("undo 1000 files %s", elapsed)
 	if elapsed > limit {

@@ -182,7 +182,7 @@ func Apply(root string, st *store.Store, items []Item) error {
 		}
 		_ = os.Remove(platform.LongPath(full))
 	}
-	return nil
+	return platform.SyncDir(root)
 }
 
 // caseRenames moves a case-only rename onto the spelling undo should restore.
@@ -249,7 +249,7 @@ func writeOne(root string, st *store.Store, it Item) error {
 		if mode == 0 {
 			mode = 0o644
 		}
-		return platform.WriteFileAtomic(full, raw, mode)
+		return platform.WriteFileAtomicUnsynced(full, raw, mode)
 	}
 }
 
