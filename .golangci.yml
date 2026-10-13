@@ -7,6 +7,18 @@ run:
 
 linters:
   default: standard
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - (io.Closer).Close
+        - (*os.File).Close
+        - (*database/sql.Rows).Close
+        - (*github.com/fsnotify/fsnotify.Watcher).Close
+        - (*github.com/klauspost/compress/zstd.Encoder).Close
+        - (*github.com/lintsinghua/oops/internal/engine.Engine).Close
 
 formatters:
   enable:
