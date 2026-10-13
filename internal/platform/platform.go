@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"unicode"
 
 	"golang.org/x/text/unicode/norm"
@@ -223,15 +224,27 @@ func rejectEscapingSymlink(root, full string) error {
 	return nil
 }
 
+// securedDirs remembers directories this process has already made private.
+// Resetting the Windows ACL on every file in a batch dominated undo time.
+var securedDirs sync.Map
+
 // SecureMkdir creates a directory private to the current user.
 func SecureMkdir(path string) error {
+	path = filepath.Clean(path)
+	if _, ok := securedDirs.Load(path); ok {
+		return nil
+	}
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
 	if err := os.Chmod(path, 0o700); err != nil && runtime.GOOS != "windows" {
 		return err
 	}
-	return secureDir(path)
+	if err := secureDir(path); err != nil {
+		return err
+	}
+	securedDirs.Store(path, struct{}{})
+	return nil
 }
 
 // WriteFileAtomic writes data to path via a temp file, fsync, and rename.
