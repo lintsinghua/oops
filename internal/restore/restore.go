@@ -6,8 +6,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/lintsinghua/oops/internal/platform"
@@ -150,13 +152,8 @@ func Apply(root string, st *store.Store, items []Item) error {
 	if err != nil {
 		return err
 	}
-	for _, it := range writes {
-		if err := writeOne(root, st, it); err != nil {
-			if platform.IsBusy(err) {
-				return &BusyError{Path: it.Path, Err: err}
-			}
-			return err
-		}
+	if err := writeAll(root, st, writes); err != nil {
+		return err
 	}
 	sort.Slice(removes, func(i, j int) bool { return len(removes[i].Path) > len(removes[j].Path) })
 	for _, it := range removes {
@@ -217,6 +214,54 @@ func caseRenames(root string, writes, removes []Item) (map[string]struct{}, erro
 	return done, nil
 }
 
+func writeAll(root string, st *store.Store, writes []Item) error {
+	if len(writes) == 0 {
+		return nil
+	}
+	workers := runtime.GOMAXPROCS(0)
+	if workers > 8 {
+		workers = 8
+	}
+	if workers > len(writes) {
+		workers = len(writes)
+	}
+	jobs := make(chan Item)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var first error
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for it := range jobs {
+				mu.Lock()
+				failed := first != nil
+				mu.Unlock()
+				if failed {
+					continue
+				}
+				err := writeOne(root, st, it)
+				if err != nil && platform.IsBusy(err) {
+					err = &BusyError{Path: it.Path, Err: err}
+				}
+				if err != nil {
+					mu.Lock()
+					if first == nil {
+						first = err
+					}
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+	for _, it := range writes {
+		jobs <- it
+	}
+	close(jobs)
+	wg.Wait()
+	return first
+}
+
 func writeOne(root string, st *store.Store, it Item) error {
 	if it.Want == nil {
 		return nil
@@ -249,7 +294,7 @@ func writeOne(root string, st *store.Store, it Item) error {
 		if mode == 0 {
 			mode = 0o644
 		}
-		return platform.WriteFileAtomicUnsynced(full, raw, mode)
+		return platform.WriteFileInPlace(full, raw, mode)
 	}
 }
 
