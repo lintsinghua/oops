@@ -109,6 +109,9 @@ func TestHotScanReusesObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Files written in the last second are re-read. Wait that window out so
+	// this measures a cache hit, which is what a hot scan is.
+	time.Sleep(1100 * time.Millisecond)
 	start := time.Now()
 	if _, _, err := e.Capture(ctx, ws, SnapOptions{}); err != nil {
 		t.Fatal(err)
