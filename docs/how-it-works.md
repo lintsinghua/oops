@@ -77,9 +77,9 @@ For each changed path, `restore.Plan` compares three states:
 
 Kept paths are not overwritten. The command exits 3 and prints `oops undo <n> --file <path> --force`. `--force` saves the current tree first (the safety snapshot below) and then writes the desired bytes.
 
-Before any apply, oops writes a safety snapshot and a journal at `workspaces/<id>/journal/current.json`. If the process dies mid-apply, the next command either finishes the journal or rolls it back. `oops redo` reads the latest applied operation and puts those paths back to the pre-undo state when they still match what undo wrote. `oops rewind <n>` replays the diffs from turn n through the latest turn, so edits that happened in the gaps and were not part of those turns are kept.
+Before any apply, oops writes a safety snapshot and a journal at `workspaces/<id>/journal/current.json`. If the process dies mid-apply, the next command either finishes the journal or rolls it back. `oops redo` pops the newest applied undo, rewind, or restore and puts those paths back when they still match. That operation moves to the redo stack, so another `oops redo` pops the previous one, and `oops undo` with no turn number puts the most recently redone operation back. A new undo of a specific turn discards that redo stack. `oops rewind <n>` replays the diffs from turn n through the latest turn, so edits that happened in the gaps and were not part of those turns are kept.
 
-The last finished turn is undone immediately by `oops undo`. An older turn, or `--force`, prints a preview and asks on a terminal; without a terminal it exits 2 unless you pass `-y`. `oops rewind` always asks unless you pass `-y`. The timeline (`oops` with a terminal, not `--json`, not `TERM=dumb`) asks before undo, rewind, and redo.
+`oops undo` with no turn number undoes the redo stack first when one exists, otherwise the newest turn that is not already undone. That is immediate when it is also the latest finished turn. An older turn, or `--force`, prints a preview and asks on a terminal; without a terminal it exits 2 unless you pass `-y`. A turn that is still running is refused (exit 4) unless you pass `--running`, which closes it and then undoes it. `oops list` and the other commands close a leftover running turn lazily. `oops rewind` always asks unless you pass `-y`. The timeline (`oops` with a terminal, not `--json`, not `TERM=dumb`) asks before undo or rewind. Esc or Ctrl+C on a confirmation cancels with exit 130.
 
 `undo`, `rewind`, `redo`, `restore`, `snap`, and `gc` accept `-n` / `--dry-run`. `undo -n --json` and `show --json` print JSON (`schema_version` 1). `show --json` includes the file list. See [schema.md](schema.md).
 
@@ -102,7 +102,7 @@ After a post-turn snapshot finishes, a detached process runs retention: drop tur
 
 ## Hooks and network
 
-The post-turn hook writes a small job and returns. A detached `oops finish-pending` process takes the post snapshot, then runs retention. The next command, and the next turn start, wait until that job is finished, so the post snapshot is not taken after the following turn has already edited files. The pre snapshot stays synchronous.
+The turn-start hook stores the pre snapshot before it returns. An edit that happens after that return, including an immediate `rm -rf`, is not part of the pre snapshot, so undo can put the original tree back. The turn-end hook writes a small job and returns; that return is not the snapshot finishing. A detached `oops finish-pending` process takes the post snapshot, then runs retention. The next command, and the next turn start, wait until that job is finished or 30 seconds have passed, and if the child has died they finish the job themselves. The post snapshot is therefore not taken after the following turn has already opened.
 
 Claude Code's `SubagentStop` hook is installed. It is logged and does not open or close a turn. Files a subagent wrote are in the snapshot when they are on disk at the parent turn's post snapshot.
 

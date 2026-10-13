@@ -289,6 +289,12 @@ func renderShow(w io.Writer, opt *options, t meta.Turn, changes []snapshot.Chang
 		} else if c.Insertions != 0 || c.Deletions != 0 {
 			extra = fmt.Sprintf("  +%d %s%d", c.Insertions, sym.Minus, c.Deletions)
 		}
+		if c.Ignored {
+			extra += "  ignored"
+		}
+		if c.Untracked {
+			extra += "  untracked"
+		}
 		fmt.Fprintf(w, "  %-10s %s%s\n", action, c.Path, extra)
 	}
 	fmt.Fprintln(w)
@@ -303,13 +309,15 @@ func writeShowJSON(w io.Writer, t meta.Turn, changes []snapshot.Change) error {
 		Insertions int    `json:"insertions"`
 		Deletions  int    `json:"deletions"`
 		Binary     bool   `json:"binary,omitempty"`
+		Untracked  bool   `json:"untracked,omitempty"`
+		Ignored    bool   `json:"ignored,omitempty"`
 	}
 	files := make([]row, 0, len(changes))
 	for _, c := range changes {
 		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
 			continue
 		}
-		files = append(files, row{Path: c.Path, Action: c.Action, Insertions: c.Insertions, Deletions: c.Deletions, Binary: c.Binary})
+		files = append(files, row{Path: c.Path, Action: c.Action, Insertions: c.Insertions, Deletions: c.Deletions, Binary: c.Binary, Untracked: c.Untracked, Ignored: c.Ignored})
 	}
 	ended := ""
 	if !t.EndedAt.IsZero() {

@@ -3,9 +3,11 @@ package cli
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
 	"time"
@@ -58,7 +60,9 @@ func loadWS(opt *options, e *engine.Engine) (engine.Workspace, error) {
 	if err != nil && opt.debug && status != "rolled-back" {
 		fmt.Fprintf(opt.stderr, "debug: %v\n", err)
 	}
-	_ = e.LazyClose(ctx, ws)
+	if !opt.noLazyClose {
+		_ = e.LazyClose(ctx, ws)
+	}
 	if !opt.quiet {
 		for _, n := range e.TakeNotices(ws) {
 			fmt.Fprintf(opt.stderr, "oops · %s\n", n.Text)
@@ -79,7 +83,13 @@ func parseSeq(s string) (int, error) {
 	return n, nil
 }
 
+// testingTTY overrides terminal detection. Tests set it and clear it.
+var testingTTY func(any) bool
+
 func isTTY(r any) bool {
+	if testingTTY != nil {
+		return testingTTY(r)
+	}
 	f, ok := r.(interface{ Fd() uintptr })
 	if !ok {
 		return false
@@ -87,10 +97,38 @@ func isTTY(r any) bool {
 	return isatty.IsTerminal(f.Fd())
 }
 
+// errInterrupt is returned by a reader when the user hits Ctrl+C.
+var errInterrupt = errors.New("interrupt")
+
 func ask(r io.Reader, defYes bool) (bool, error) {
-	line, err := readLine(r)
-	if err != nil {
+	type got struct {
+		line string
+		err  error
+	}
+	ch := make(chan got, 1)
+	go func() {
+		line, err := readLine(r)
+		ch <- got{line, err}
+	}()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	defer signal.Stop(sig)
+	var line string
+	var err error
+	select {
+	case <-sig:
+		return false, fail(130, "Cancelled. Nothing changed.")
+	case g := <-ch:
+		line, err = g.line, g.err
+	}
+	if errors.Is(err, errInterrupt) {
+		return false, fail(130, "Cancelled. Nothing changed.")
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
 		return false, err
+	}
+	if strings.TrimSpace(line) == "\x1b" {
+		return false, fail(130, "Cancelled. Nothing changed.")
 	}
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "":

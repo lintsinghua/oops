@@ -143,7 +143,7 @@ Planned for v0.2: GitHub Copilot CLI, opencode, Qwen Code, Amp, Goose. [Request 
 ## How it works
 
 ```
- agent turn starts ──► oops hook ──► snapshot "pre"
+ agent turn starts ──► oops hook returns only after snapshot "pre" is stored
          … agent edits, runs sed, rm -rf, git clean …
  agent turn ends   ──► oops hook returns ──► snapshot "post" finishes in the background
 
@@ -156,7 +156,7 @@ Planned for v0.2: GitHub Copilot CLI, opencode, Qwen Code, Amp, Goose. [Request 
 - **Incremental and content-addressed.** A stat cache means only changed files are read and hashed. Contents are deduplicated, zstd-compressed and immutable — the model is git's (blobs, trees), the storage is not.
 - **Your edits are safe.** Undo compares three states per file: before the turn, after the turn, and now. Anything you (or another agent) changed afterwards is kept and reported, not overwritten. `--force` overrides, and the overwritten version is saved first.
 - **Undo is undoable.** Every undo, rewind and restore takes a safety snapshot first, so `oops redo` always gets you back.
-- **Not in your way.** Hook processes always exit 0, and there is no daemon. The post-turn hook records the job and returns; a detached process stores the snapshot and then applies retention. The next turn waits for that snapshot, so the boundary stays intact. Hooks write to stdout only to answer `/oops`, or, on Claude Code, to pass a `systemMessage` when a snapshot was partial or a file was too large to store. A hard timeout (default 10s, measured from the start of that scan) marks a snapshot partial rather than blocking the agent. The next `oops` command prints the same notice.
+- **Not in your way.** Hook processes always exit 0, and there is no daemon. The turn-start hook stores the pre snapshot before it returns, so a following edit is not what undo restores. The turn-end hook records the job and returns; a detached process stores the post snapshot and then applies retention. The next turn waits for that post snapshot (at most 30s, then the waiting process finishes it), so the boundary stays intact. If that child dies, the job file remains and the next command finishes the turn. Hooks write to stdout only to answer `/oops`, or, on Claude Code, to pass a `systemMessage` when a snapshot was partial or a file was too large to store. Other agents show that notice on the next `oops` command. Each reason is shown once. A hard timeout (default 10s, measured from the start of that scan) marks a snapshot partial rather than blocking the agent.
 - **Not in your repo.** Snapshot data is never written inside the workspace. oops does not write to `.git`, create branches, or stash. `oops init --project` is the exception: it writes the agent's own project config, such as `.claude/settings.json`. Snapshots live in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). `OOPS_HOME` overrides the data directory.
 - **What's included.** Files that are not gitignored, including untracked files, plus protected files even when gitignored (`.env`, `.env.*`, `.envrc`, `*.local`, `*.local.*`, `.dev.vars`, `local.settings.json`). A gitignored path is skipped even if it was force-added. Heavy directories (`node_modules/`, `.venv/`, `target/`, …) are skipped. `dist/` and `build/` are skipped only when a gitignore rule also matches. Tune it with a `.oopsignore` (gitignore syntax). Files over 50 MB are recorded but not stored. `oops doctor`, `oops show`, and the next command say they are unprotected.
 
@@ -185,16 +185,32 @@ oops doesn't replace your agent's checkpoints — it covers what they miss. Use 
 <details>
 <summary><strong>Will it slow down my agent?</strong></summary>
 
-It's built not to. Codex's previous `/undo` was removed partly because its snapshots caused problems for users, so this is oops's first rule. Snapshots are incremental (only files whose size, mtime, or mode changed are re-read), excluded directories are pruned without being walked, and each snapshot has a hard timeout (default 10s) after which it is marked partial and the agent carries on. The post-turn hook returns as soon as the snapshot is queued. A detached process stores it, and the next turn waits so the boundary stays correct.
+It's built not to. Codex's previous `/undo` was removed partly because its snapshots caused problems for users, so this is oops's first rule. Snapshots are incremental (only files whose size, mtime, or mode changed are re-read), excluded directories are pruned without being walked, and each snapshot has a hard timeout (default 10s) after which it is marked partial and the agent carries on. The turn-end hook returns as soon as the post snapshot is queued. A detached process stores it. The turn-start hook does not return until the pre snapshot is stored.
 
-Measured on 2026-10-13 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run 'TestHotCapturePercentiles|TestHookVisibleLatency' ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. The table is `TestHookVisibleLatency`: build `./cmd/oops`, take one cold turn, then time 21 `oops hook claude turn-end` processes from start to exit. That process writes a job and returns; the capture runs in a child. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank). Machine: 4 vCPU, Linux 6.12.94+ x86_64.
+Measured on 2026-10-13 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run 'TestHotCapturePercentiles|TestHookVisibleLatency' ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank) of 21 samples. Machine: 4 vCPU, Linux 6.12.94+ x86_64.
 
-| Files | Hook p50 | Hook p95 |
+**Time the agent waits for the turn-end hook to return.** This is not the snapshot completion time. `TestHookVisibleLatency` builds `./cmd/oops`, takes one cold turn, waits until the background job is gone, then times 21 `oops hook claude turn-end` processes from start to exit. That process writes a job and exits.
+
+| Files | Agent waits for turn-end hook, p50 | Agent waits for turn-end hook, p95 |
 |---:|---:|---:|
 | 10,000 | 4 ms | 5 ms |
 | 100,000 | 5 ms | 6 ms |
 
-The same run's in-process hot `Capture` (`TestHotCapturePercentiles`: one cold capture, then 21 unchanged captures, stat walk, cache reuse, tree write, SQLite insert) was 86 ms / 93 ms at 10,000 files and 0.87 s / 3.6 s at 100,000 files (p50 / p95). The next turn's start hook waits until that background snapshot is stored.
+**Background post-snapshot completion time**, measured separately by in-process hot `Capture` (`TestHotCapturePercentiles`: one cold capture, then 21 unchanged captures, stat walk, cache reuse, tree write, SQLite insert). This is how long the snapshot takes after the turn-end hook has already returned:
+
+| Files | Background snapshot completion, p50 | Background snapshot completion, p95 |
+|---:|---:|---:|
+| 10,000 | 82 ms | 91 ms |
+| 100,000 | 0.82 s | 3.5 s |
+
+**Time the agent waits for the turn-start hook to return.** The pre snapshot runs inside that process, and the hook does not return until the snapshot is stored. Same method as the turn-end table, timing `oops hook claude turn-start` after the previous background job has finished, so this wait is the pre snapshot plus process startup. It is not the 5 ms / 6 ms figure above.
+
+| Files | Agent waits for turn-start hook, p50 | Agent waits for turn-start hook, p95 |
+|---:|---:|---:|
+| 10,000 | 92 ms | 106 ms |
+| 100,000 | 0.86 s | 0.92 s |
+
+On this run the in-process 100k Capture p95 is 3.5 s and the turn-start hook p95 is 0.92 s. Both are nearest-rank on 21 samples from the same machine and day. If the previous post snapshot is still running, the turn-start hook waits for it first, bounded at 30 seconds (`TestWaitPendingBounded`). When the job is already finished, that extra wait is under 50 ms. A dead background process does not drop the turn: the job file stays until a later command stores the post snapshot (`TestCrashedChildFinishesTurn`).
 </details>
 
 <details>

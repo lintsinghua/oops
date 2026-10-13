@@ -48,17 +48,19 @@ func newUndoCmd(opt *options) *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite files you changed after the turn")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation")
 	cmd.Flags().BoolVar(&running, "running", false, "Close a still-running turn, then undo it")
+	cmd.Example = "  oops undo\n  oops undo 12\n  oops undo --file src/app.ts"
 	return cmd
 }
 
 func cmdUndo(opt *options, seq int, files []string, dry, force, yes, running bool) error {
+	opt.noLazyClose = true
 	s, err := begin(opt)
 	if err != nil {
 		return err
 	}
 	defer s.e.Close()
 	if !dry {
-		if err := confirmUndo(opt, s, seq, force, yes); err != nil {
+		if err := confirmUndo(opt, s, seq, files, force, yes, running); err != nil {
 			return err
 		}
 	}
@@ -81,15 +83,44 @@ func cmdUndo(opt *options, seq int, files []string, dry, force, yes, running boo
 	return resultCode(res)
 }
 
-func confirmUndo(opt *options, s *session, seq int, force, yes bool) error {
+func confirmUndo(opt *options, s *session, seq int, files []string, force, yes, running bool) error {
+	if seq == 0 && len(files) == 0 && !running {
+		open, err := s.e.DB.RunningTurns(s.ws.ID)
+		if err != nil {
+			return err
+		}
+		if len(open) > 0 {
+			t := open[len(open)-1]
+			return fail(4, fmt.Sprintf("#%d is still running (%s). Stop the agent first, then run oops undo --running.", t.Seq, t.Agent))
+		}
+		if op, err := s.e.DB.LatestStackOp(s.ws.ID); err == nil && !op.Applied {
+			return nil
+		}
+	}
 	latest, err := s.e.DB.LatestFinished(s.ws.ID)
 	if err != nil {
 		if meta.IsNotFound(err) {
+			if running {
+				if open, oerr := s.e.DB.RunningTurns(s.ws.ID); oerr == nil && len(open) > 0 {
+					return nil
+				}
+			}
 			return fail(4, "Nothing to undo here yet. oops protects this folder once an agent runs in it.")
 		}
 		return err
 	}
-	needs := force || (seq != 0 && seq != latest.Seq)
+	target := latest
+	if seq == 0 {
+		if done, derr := s.e.DB.LatestUndoable(s.ws.ID); derr == nil {
+			target = done
+		}
+	} else if t, terr := s.e.DB.GetTurn(s.ws.ID, seq); terr == nil {
+		target = t
+	}
+	if target.Status == "running" && !running {
+		return fail(4, fmt.Sprintf("#%d is still running (%s). Stop the agent first, then run oops undo --running.", target.Seq, target.Agent))
+	}
+	needs := force || target.Seq != latest.Seq
 	if !needs || yes {
 		return nil
 	}
@@ -134,10 +165,12 @@ func newRewindCmd(opt *options) *cobra.Command {
 	cmd.Flags().BoolVarP(&dry, "dry-run", "n", false, "Preview without changing files")
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite files you changed after these turns")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation")
+	cmd.Example = "  oops rewind 12\n  oops rewind 12 -n"
 	return cmd
 }
 
 func cmdRewind(opt *options, seq int, dry, force, yes bool) error {
+	opt.noLazyClose = true
 	s, err := begin(opt)
 	if err != nil {
 		return err
@@ -224,6 +257,7 @@ func newRedoCmd(opt *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&dry, "dry-run", "n", false, "Preview without changing files")
+	cmd.Example = "  oops redo\n  oops redo -n"
 	return cmd
 }
 
@@ -245,6 +279,7 @@ func newRestoreCmd(opt *options) *cobra.Command {
 	cmd.Flags().BoolVar(&force, "force", false, "Overwrite a file that differs")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation")
 	cmd.Flags().BoolVarP(&dry, "dry-run", "n", false, "Preview without changing files")
+	cmd.Example = "  oops restore src/app.ts --at 12"
 	return cmd
 }
 
@@ -332,6 +367,7 @@ func newListCmd(opt *options) *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "Include safety snapshots")
 	cmd.Flags().StringVar(&agent, "agent", "", "Only this agent")
 	cmd.Flags().StringVar(&since, "since", "", "Only turns newer than this duration (for example 24h)")
+	cmd.Example = "  oops list\n  oops list -n 5\n  oops list --json"
 	return cmd
 }
 
@@ -392,6 +428,7 @@ func newShowCmd(opt *options) *cobra.Command {
 			}
 			return cmdShow(opt, seq)
 		},
+		Example: "  oops show\n  oops show 12",
 	}
 }
 
@@ -409,6 +446,7 @@ func cmdShow(opt *options, seq int) error {
 	if err != nil {
 		return err
 	}
+	annotateGit(s.ws.Path, changes)
 	var skipped []meta.Skipped
 	seen := map[string]bool{}
 	for _, id := range []string{t.PreSnap, t.PostSnap} {
@@ -446,6 +484,7 @@ func newDiffCmd(opt *options) *cobra.Command {
 	cmd.Flags().BoolVar(&names, "name-only", false, "List paths only")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Show the undo direction")
 	cmd.Flags().BoolVar(&noPager, "no-pager", false, "Print the diff without a pager")
+	cmd.Example = "  oops diff\n  oops diff 12 --stat\n  oops diff -- src/app.ts"
 	return cmd
 }
 
@@ -627,6 +666,7 @@ func newSnapCmd(opt *options) *cobra.Command {
 	}
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Note stored with the checkpoint")
 	cmd.Flags().BoolVarP(&dry, "dry-run", "n", false, "Preview without writing a checkpoint")
+	cmd.Example = "  oops snap -m \"before the experiment\""
 	return cmd
 }
 
@@ -642,6 +682,7 @@ func newRunCmd(opt *options) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&name, "name", "", "Label stored on the turn")
 	cmd.Flags().StringVar(&idle, "idle", "", "Silence before an automatic checkpoint (default 3s)")
+	cmd.Example = "  oops run -- claude\n  oops run --idle 3s -- npm test"
 	return cmd
 }
 
@@ -659,6 +700,7 @@ func newGCCmd(opt *options) *cobra.Command {
 	cmd.Flags().BoolVar(&all, "all", false, "Delete this workspace's snapshots")
 	cmd.Flags().BoolVar(&global, "global", false, "With --all, delete every workspace")
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Skip confirmation")
+	cmd.Example = "  oops gc -n\n  oops gc"
 	return cmd
 }
 

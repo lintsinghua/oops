@@ -38,6 +38,7 @@ func newInitCmd(opt *options) *cobra.Command {
 	cmd.Flags().StringArrayVar(&only, "agent", nil, "Only this agent (repeatable)")
 	cmd.Flags().StringArrayVar(&pathExtra, "path", nil, "Extra directories to search for agent binaries")
 	_ = cmd.Flags().MarkHidden("path")
+	cmd.Example = "  oops init -y\n  oops init --undo"
 	return cmd
 }
 

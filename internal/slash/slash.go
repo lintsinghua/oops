@@ -23,12 +23,29 @@ func Run(e *engine.Engine, ws engine.Workspace, args []string, now time.Time) (s
 		if len(args) > 1 {
 			seq = parseSeq(args[1])
 		}
-		latest, err := e.DB.LatestFinished(ws.ID)
-		if err != nil {
-			return "Nothing to undo here yet. oops protects this folder once an agent runs in it.", 4
-		}
-		if seq != 0 && seq != latest.Seq {
-			return fmt.Sprintf("oops undo %d needs confirmation. Re-run with -y in a terminal.", seq), 2
+		if seq == 0 {
+			if open, err := e.DB.RunningTurns(ws.ID); err == nil && len(open) > 0 {
+				t := open[len(open)-1]
+				return fmt.Sprintf("#%d is still running (%s). Stop the agent first.", t.Seq, t.Agent), 4
+			}
+			if op, err := e.DB.LatestStackOp(ws.ID); err != nil || op.Applied {
+				latest, lerr := e.DB.LatestFinished(ws.ID)
+				target, terr := e.DB.LatestUndoable(ws.ID)
+				if lerr != nil || terr != nil {
+					return "Nothing to undo here yet. oops protects this folder once an agent runs in it.", 4
+				}
+				if target.Seq != latest.Seq {
+					return fmt.Sprintf("oops undo %d needs confirmation. Re-run with -y in a terminal.", target.Seq), 2
+				}
+			}
+		} else {
+			latest, err := e.DB.LatestFinished(ws.ID)
+			if err != nil {
+				return "Nothing to undo here yet. oops protects this folder once an agent runs in it.", 4
+			}
+			if seq != latest.Seq {
+				return fmt.Sprintf("oops undo %d needs confirmation. Re-run with -y in a terminal.", seq), 2
+			}
 		}
 		res, err := e.Undo(context.Background(), engine.UndoRequest{Workspace: ws, Seq: seq})
 		if err != nil {

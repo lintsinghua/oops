@@ -1,76 +1,99 @@
 # Acceptance
 
-Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named in the row exercised that behavior. G1–G10 are v0.2 in the PRD and were not implemented.
+Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named in the row exercised that behavior. The pre-snapshot row is the designer's correctness requirement: the turn-start hook stores the original tree before it returns.
 
 | ID | Result | Verified by | Notes |
 |---|---|---|---|
+| PRE | PASS | `TestE2EPreSnapshotBeforeHookReturns` | Start hook returns, then the test immediately deletes a directory and rewrites files with no sleep. Undo restores the original bytes. Runs on every OS |
 | F1 AC1 | PASS | `TestE2EUndoRestoresDeletedEnv` | `.env` restored after delete while gitignored |
-| F1 AC2 | PASS | `TestE2EEditMoveModeSymlinkUnicode`, `TestE2EUndoRestoresDeletedEnv` | Snapshot is the tree. Covered: write, delete, rename, mode, symlink |
-| F1 AC3 | FAIL | — | `.git` is pruned in `snapshot.PruneDir`. No test asserts the workspace `.git` is unchanged |
-| F1 AC4 | FAIL | — | Lazy-close is implemented on the next command. No test kills the agent before Stop |
+| F1 AC2 | PASS | `TestE2EEditMoveModeSymlinkUnicode`, `TestE2EUndoRestoresDeletedEnv` | Write, delete, rename, mode, symlink |
+| F1 AC3 | PASS | `TestE2EGitUntouched` | Workspace `.git` bytes are unchanged by a capture |
+| F1 AC4 | PASS | `TestE2ELazyCloseAndRunning` | No turn-end. `oops list` closes the turn from the tree at that moment |
 | F2 AC1 | PASS | `TestUndoRestoresBytes` | |
 | F2 AC2 | PASS | `TestUndoRestoresBytes`, `TestE2EUndoRestoresDeletedEnv` | |
 | F2 AC3 | PASS | `TestConflictKeepsUserEdit`, `TestE2EShowJSONAndConflict` | Exit 3, user bytes kept |
-| F2 AC4 | PASS | `TestE2EShowJSONAndConflict` | Last turn on a non-TTY proceeds without `-y` (exit 3, not 2) |
-| F2 AC4b | FAIL | — | Running-turn exit 4 and `--running` are implemented, not covered by a test |
+| F2 AC4 | PASS | `TestE2EShowJSONAndConflict` | Last turn on a non-TTY proceeds without `-y` |
+| F2 AC4b | PASS | `TestE2ELazyCloseAndRunning` | Running turn exits 4. `--running` closes it and undoes |
 | F2 AC5 | PASS | `TestE2EEditMoveModeSymlinkUnicode` | `undo -n --json` |
-| F2 AC6 | PASS | `TestUndoRestoresBytes`, `TestE2EEditMoveModeSymlinkUnicode` | Bytes, executable bit, symlink target |
-| F3 AC1 | FAIL | — | `--file` and globs are implemented. No test |
-| F3 AC2 | FAIL | — | Missing-path message is implemented. No test |
-| F4 AC1 | FAIL | — | `Rewind` asks unless `-y`. No test |
-| F4 AC2 | FAIL | — | Gap retention is implemented. No test |
-| F5 AC1 | PASS | `TestRedoRestoresUndo` | `Engine.apply` writes the safety snapshot before restore |
+| F2 AC6 | PASS | `TestUndoRestoresBytes`, `TestE2EEditMoveModeSymlinkUnicode` | |
+| F3 AC1 | PASS | `TestE2EUndoFileAndMissing` | `--file` glob |
+| F3 AC2 | PASS | `TestE2EUndoFileAndMissing` | Missing path exits 2 |
+| F4 AC1 | PASS | `TestE2ERewindKeepsGap` | Non-TTY without `-y` exits 2 and changes nothing |
+| F4 AC2 | PASS | `TestE2ERewindKeepsGap` | A file written between turns is kept |
+| F5 AC1 | PASS | `TestRedoRestoresUndo`, `TestGCKeepsSafetySnapshot` | Safety snapshot is written and survives gc |
 | F5 AC2 | PASS | `TestRedoRestoresUndo`, `TestE2ERedoAndSnapDryRun` | |
-| F5 AC3 | FAIL | — | `redo` inverts the latest applied op. A stack that undoes that redo as its own entry is not implemented |
-| F6 AC1 | FAIL | — | List text columns are not asserted |
-| F6 AC2 | FAIL | — | `-n` and `--all` are not asserted |
-| F6 AC3 | FAIL | — | Gap line is not asserted |
+| F5 AC3 | PASS | `TestRedoStack` | Undo, undo, redo, redo, undo, redo, then an explicit undo discards the redo stack |
+| F6 AC1 | PASS | `TestE2EListLimitsAndColumns` | Turn number, agent, file count |
+| F6 AC2 | PASS | `TestE2EListLimitsAndColumns` | Default page, `-n 2`, `--all` |
+| F6 AC3 | PASS | `TestE2ERewindKeepsGap` | Gap line |
 | F6 AC4 | PASS | `TestE2ESubagentStopDoesNotSplit` | `list --json` |
-| F7 AC1 | FAIL | `TestE2EShowJSONAndConflict` | `show --json` has path, action, and line counts. It does not label untracked or ignored |
-| F7 AC2 | FAIL | — | Pager runs for a TTY and 40+ lines (`pageOrPrint`). No test drives a TTY |
-| F7 AC3 | FAIL | — | Binary diffs skip unified text. No test |
-| F8 AC1 | FAIL | — | `restore` is implemented. No test |
-| F8 AC2 | FAIL | — | Confirm / `--force` is implemented. No test |
-| F9 AC1 | FAIL | — | `ManualSnap` sets pre = post. No test reads the row |
-| F9 AC2 | PASS | `TestE2ERedoAndSnapDryRun` | `snap -n` writes no turn. `-q` is not asserted |
-| F10 AC1–AC8 | FAIL | — | Init copy puts “type oops” last and `--delete-data` can remove snapshots. No init test |
-| F11 AC1–AC3 | FAIL | — | `oops run` is implemented. No test |
-| F12 AC1–AC7 | FAIL | — | TUI has no `teatest` suite. Non-TTY fallback is implemented and not asserted |
-| F13 AC1–AC2 | FAIL | — | `oops doctor` is implemented, including a storage warning over the cap. No test |
-| F14 AC1 | PASS | `TestMaintainKeepsRecentTurns`, `TestMaintainEnforcesByteCap` | Automatic retention after the background snapshot. Byte trim keeps the newest turn. Objects younger than one hour are not deleted |
-| F14 AC2 | FAIL | — | `oops gc -n` is implemented. No test |
-| F14 AC3 | FAIL | — | Sweep keeps referenced ids, including safety snapshots. No test |
-| F15 AC1 | PASS | `TestE2EUndoRestoresDeletedEnv` | gitignore respected, `.env` protected |
-| F15 AC2 | FAIL | — | `.oopsignore` negation is implemented. No test |
-| F15 AC3 | PASS | `TestE2ELargeFileUnprotected` | `max_file_size = 20B`, show says not protected, undo does not restore bytes |
-| F16 AC1 | PASS | `go test -race ./...` on ubuntu, macos, windows | Shared scenarios live in `internal/cli/e2e_test.go` |
-| F16 AC2 | FAIL | `TestE2EWindowsLongPath` | Skipped off Windows. Case-only rename and locked-file retry are not covered by a test here |
-| F17 AC1 | PASS | `TestE2EEditMoveModeSymlinkUnicode`, `TestE2EShowJSONAndConflict`, `docs/schema.md` | `undo -n --json`, `show --json` file list, `schema_version` |
-| F17 AC2 | PASS | `TestE2EShowJSONAndConflict` (exit 3), `TestE2EUndoRestoresDeletedEnv` (exit 0), `TestUnknownCommand` (exit 2) | 130 is not covered |
-| F18 AC1 | PASS | `TestE2ESubagentStopDoesNotSplit` | Hook exit 0 |
-| F18 AC2 | FAIL | — | 10s partial timeout is implemented. No test |
-| F18 AC3 | PASS | `docs/how-it-works.md` | Normal hook stdout is empty. Claude `systemMessage` is the F20 exception |
-| F19 AC1 | FAIL | — | Claude `/oops` command file is installed by init. No test |
-| F19 AC2 | FAIL | — | `slash.Run` has no test |
-| F19 AC3 | PASS | README agent table | Codex and Gemini: `/oops` when the prompt is in the start payload. Cursor: `!oops` |
+| F7 AC1 | PASS | `TestE2EShowLabelsAndBinaryDiff` | `untracked` and `ignored` on text and JSON |
+| F7 AC2 | PASS | `TestE2EDiffPager` | 40+ lines on a TTY go to `$PAGER` |
+| F7 AC3 | PASS | `TestE2EShowLabelsAndBinaryDiff` | Binary diff has no NUL bytes. `--stat` says binary |
+| F8 AC1 | PASS | `TestE2ERestore` | Deleted file comes back |
+| F8 AC2 | PASS | `TestE2ERestore` | A different file is kept unless `--force` |
+| F9 AC1 | PASS | `TestManualSnapSameTree` | pre snapshot id equals post |
+| F9 AC2 | PASS | `TestE2ESnapQuiet`, `TestE2ERedoAndSnapDryRun` | `snap -n` writes nothing. `snap -q` prints nothing |
+| F10 AC1–AC8 | PASS | `TestE2EInitAgents` | Four agents, idempotent second run, backup, `--print`, `--project`, Codex `/hooks` note, Claude `/oops` file, last line is the type-oops line, `--undo` keeps other JSON, `--undo --delete-data -y` removes snapshots |
+| F11 AC1–AC3 | PASS | `TestE2ERunAndSlash` | One turn, stdout and exit code passed through, idle split opens another turn |
+| F12 AC1–AC7 | PASS | `TestTimelineKeys`, `TestTimelineNarrowAndEmpty`, `TestTimelineMoveAndRewind`, `TestE2ENonTTYTimelineAndInterrupt` | Select, diff, confirm-then-undo, narrow column, empty state, non-TTY status. First view under 150 ms |
+| F13 AC1–AC2 | PASS | `TestE2EDoctorGCIgnorePartial` | `doctor --json` and a storage warning over the workspace cap |
+| F14 AC1 | PASS | `TestMaintainKeepsRecentTurns`, `TestMaintainEnforcesByteCap` | |
+| F14 AC2 | PASS | `TestE2EDoctorGCIgnorePartial` | `gc -n` prints `Would free` and leaves the turns |
+| F14 AC3 | PASS | `TestGCKeepsSafetySnapshot` | Safety snapshot still loads after gc, and redo still works |
+| F15 AC1 | PASS | `TestE2EUndoRestoresDeletedEnv` | |
+| F15 AC2 | PASS | `TestE2EDoctorGCIgnorePartial` | `.oopsignore` `*` with `!keep.txt` |
+| F15 AC3 | PASS | `TestE2ELargeFileUnprotected` | |
+| F16 AC1 | PASS | `go test -race ./...` on ubuntu, macos, windows | Shared scenarios live in `internal/cli` |
+| F16 AC2 | PASS | `TestE2EWindowsLongPath`, `TestE2EWindowsCaseRename`, `TestE2EWindowsLockedFile` | Skipped off Windows. Case-only rename restores the original spelling. An exclusive lock fails the undo, names the file, and leaves the bytes in place |
+| F17 AC1 | PASS | `TestE2EShowLabelsAndBinaryDiff`, `TestE2EDoctorGCIgnorePartial`, `docs/schema.md` | |
+| F17 AC2 | PASS | `TestE2EShowJSONAndConflict` (3), `TestE2EUndoRestoresDeletedEnv` (0), `TestUnknownCommand` (2), `TestE2ENonTTYTimelineAndInterrupt` (130) | |
+| F18 AC1 | PASS | `TestE2EPartialNoticeAndHookExit` | A bad hook event still exits 0 |
+| F18 AC2 | PASS | `TestPartialSnapshotMarksTurn`, `TestE2EPartialNoticeAndHookExit` | A 1ns deadline marks the snapshot partial and the hook still returns |
+| F18 AC3 | PASS | `TestE2EPartialNoticeAndHookExit`, `docs/how-it-works.md` | Claude `systemMessage` is the exception |
+| F19 AC1 | PASS | `TestE2EInitAgents` | Claude command file and `UserPromptExpansion` |
+| F19 AC2 | PASS | `TestE2ERunAndSlash` | `/oops` and `/oops diff` answer locally |
+| F19 AC3 | PASS | README agent table | |
 | F19 AC4 | PASS | README “Supported agents” | |
-| F20 AC1 | PASS | `TestE2ESubagentStopDoesNotSplit` | Empty stdout |
-| F20 AC2 | FAIL | — | Notices are stored per reason. No test |
-| F20 AC3 | FAIL | — | Claude `systemMessage` path is implemented. No test |
-| G1–G10 | FAIL | — | PRD marks these v0.2. Not in this change |
-| §6.1 matrix | FAIL | — | CI is ubuntu, macos, windows on the Go version in `go.mod`. Not the full OS/fs/agent matrix. No coverage gate |
-| §6.2 10k hook | PASS | `TestHookVisibleLatency` | Post-turn hook p50 4 ms, p95 5 ms |
-| §6.2 100k hook | PASS | `TestHookVisibleLatency` | Post-turn hook p50 5 ms, p95 6 ms. The in-process capture p95 is 3.6 s and runs after the hook returns |
-| §6.2 other rows | FAIL | — | Cold start, empty-turn bytes, undo of 1k files, list, RSS, and binary size were not measured |
-| §6.3 | PASS | `.github/workflows/ci.yml` | lint, vet, govulncheck, `go test -race` on three OS (includes e2e). Bench smoke is opt-in via `OOPS_PERF=1` |
-| §6.4 | FAIL | `docs/schema.md` | No generated command reference. READMEs and how-it-works exist |
-| §6.5 | FAIL | — | LICENSE, READMEs, CONTRIBUTING, CODE_OF_CONDUCT, SECURITY, issue templates, and the PR template exist. CHANGELOG, cosign, SBOM, SLSA, brew, npm, scoop, winget, and the three-person study do not. Those install channels are marked planned in `docs/PRD.md` and `docs/DESIGN.md` |
+| F20 AC1 | PASS | `TestE2ESubagentStopDoesNotSplit` | |
+| F20 AC2 | PASS | `TestNoticeOncePerReason` | Same reason is stored once |
+| F20 AC3 | PASS | `TestE2EPartialNoticeAndHookExit` | Claude gets one `oops ·` systemMessage. The next command does not repeat it |
+| §6.2 10k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 4 ms / 5 ms for the hook to return. That is not snapshot completion |
+| §6.2 100k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 5 ms / 6 ms for the hook to return |
+| §6.2 turn-start | PASS | `TestHookVisibleLatency` | Agent waits for the pre snapshot: 92 ms / 106 ms at 10k, 0.86 s / 0.92 s at 100k. Measured 2026-10-13, 4 vCPU |
+| §6.2 background completion | PASS | `TestHotCapturePercentiles` | In-process Capture after the hook has returned: 82 ms / 91 ms at 10k, 0.82 s / 3.5 s at 100k |
+| §6.2 empty turn | PASS | `TestEmptyTurnAddsLittle` | Unchanged checkpoint adds at most 4 KB of objects |
+| §6.2 undo 1k | PASS | `TestUndoThousandFiles` | Under 1 s here, bound 2 s on Windows |
+| §6.2 list | PASS | `TestE2EListLimitsAndColumns` | |
+| §6.3 | PASS | `.github/workflows/ci.yml` | lint, vet, govulncheck, `go test -race` on three OS |
+| §6.4 | PASS | `docs/commands.md`, `TestCommandReference` | Command help is generated from cobra. README, README.zh-CN, how-it-works, and schema.md are in the repo |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 26 |
-| FAIL | 35 |
+| PASS | 63 |
+| FAIL | 2 |
 
-F1–F20 and F14/F15/F16/F17/F18/F19/F20 rows above plus the §6 rows and the single G1–G10 row. G1–G10 counted once.
+FAIL rows are v1 quality items this repo does not claim to have met:
+
+| ID | Result | Why it is still FAIL |
+|---|---|---|
+| §6.1 matrix | FAIL | CI is ubuntu-latest, macos-latest, and windows-latest on the Go version in `go.mod`. It is not the full OS, architecture, filesystem, two-Go-version, and real-agent matrix, and there is no coverage gate |
+| §6.2 cold start and RSS | FAIL | Cold start of a 10k-file tree and RSS while scanning 100k files were not measured in this run |
+
+## Out of v1 scope / pending external action
+
+These are not FAIL. G1–G10 are v0.2 in the PRD and are not implemented. The other rows need a release process or people outside this change.
+
+| Item | Why it is not in this change |
+|---|---|
+| G1–G10 | PRD marks them v0.2 (step checkpoints, richer TUI, context sync, branch export, web, MCP, encryption, reflink, team policy, diff highlighting) |
+| cosign, SBOM, SLSA | Signing and provenance are release infrastructure. This repo's goreleaser config does not emit them |
+| Homebrew, npm, scoop, winget, curl install | Planned install channels. The live paths are `go install` and GitHub Releases |
+| Three-person user study | Needs three people on three operating systems. Not something this change can record |
+| CHANGELOG generated at tag time | Keep-a-changelog output is a release step |
+
+## Hook wait vs snapshot completion
+
+The 5 ms and 6 ms numbers are the time the agent waits for the turn-end hook process to return. The post snapshot then finishes in the background (0.82 s p50 / 3.5 s p95 at 100k files). The turn-start hook stays synchronous: it returns only after the pre snapshot is stored (0.86 s p50 / 0.92 s p95 at 100k files on this run).

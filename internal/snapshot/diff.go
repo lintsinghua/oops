@@ -18,6 +18,8 @@ type Change struct {
 	Insertions int
 	Deletions  int
 	Binary     bool
+	Untracked  bool
+	Ignored    bool
 }
 
 // Diff compares pre and post flattened trees.

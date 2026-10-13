@@ -26,18 +26,19 @@ func fail(code int, msg string) error { return &exitError{code: code, msg: msg} 
 
 // options are the global flags.
 type options struct {
-	json       bool
-	color      string
-	quiet      bool
-	debug      bool
-	dir        string
-	home       string
-	userHome   string
-	config     string
-	accessible bool
-	stdin      io.Reader
-	stdout     io.Writer
-	stderr     io.Writer
+	json        bool
+	color       string
+	quiet       bool
+	debug       bool
+	dir         string
+	home        string
+	userHome    string
+	config      string
+	accessible  bool
+	noLazyClose bool
+	stdin       io.Reader
+	stdout      io.Writer
+	stderr      io.Writer
 }
 
 func (o options) colorOn() bool {
