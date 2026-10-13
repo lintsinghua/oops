@@ -293,7 +293,7 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode, sync bool) erro
 	if err := os.Chmod(tmpName, mode); err != nil && runtime.GOOS != "windows" {
 		return err
 	}
-	if err := renameReplace(tmpName, path); err != nil {
+	if err := renameReplace(tmpName, path, sync); err != nil {
 		return err
 	}
 	ok = true

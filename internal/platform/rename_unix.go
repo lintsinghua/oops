@@ -4,7 +4,7 @@ package platform
 
 import "os"
 
-func renameReplace(src, dst string) error {
+func renameReplace(src, dst string, _ bool) error {
 	return os.Rename(src, dst)
 }
 
