@@ -37,9 +37,7 @@ func (m VersionModel) View() string {
 	title := lipgloss.NewStyle().Bold(true)
 	label := lipgloss.NewStyle().Faint(true)
 
-	return lipgloss.JoinVertical(lipgloss.Left,
-		title.Render("oops "+m.info.Version),
-		label.Render("commit: "+m.info.Commit),
-		label.Render("built: "+m.info.Date),
-	) + "\n"
+	return title.Render("oops "+m.info.Version) + "\n" +
+		label.Render("commit: "+m.info.Commit) + "\n" +
+		label.Render("built: "+m.info.Date) + "\n"
 }
