@@ -59,6 +59,7 @@ func TestKillDuringUndoRecovers(t *testing.T) {
 
 	cmd := exec.Command(bin, "--home", home, "--dir", root, "--color", "never", "undo", "-y")
 	cmd.Dir = root
+	cmd.Env = append(os.Environ(), "OOPS_TEST_RESTORE_DELAY=40ms")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -90,6 +91,10 @@ func TestKillDuringUndoRecovers(t *testing.T) {
 		_ = cmd.Process.Kill()
 		<-done
 		t.Fatal("journal did not appear while undo was still running")
+	}
+	j, stillPending := pendingJournal(home)
+	if !stillPending || j.SafetySnap == "" {
+		t.Fatal("kill landed after the journal was committed")
 	}
 	select {
 	case <-done:

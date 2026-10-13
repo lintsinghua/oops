@@ -294,6 +294,10 @@ func writeOne(root string, st *store.Store, it Item) error {
 		if mode == 0 {
 			mode = 0o644
 		}
+		// A child process under test sets this so a kill can land between files.
+		if d, err := time.ParseDuration(os.Getenv("OOPS_TEST_RESTORE_DELAY")); err == nil && d > 0 {
+			time.Sleep(d)
+		}
 		// Temp file in the same directory, then rename. A crash cannot leave a
 		// truncated user file; the old bytes stay until the rename commits.
 		return platform.WriteFileAtomicUnsynced(full, raw, mode)
