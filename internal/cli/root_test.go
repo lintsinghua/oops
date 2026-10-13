@@ -34,8 +34,10 @@ func TestHelp(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit code = %d, output = %q", code, out)
 	}
-	if !strings.Contains(out, "oops") || !strings.Contains(out, "version") {
-		t.Fatalf("help = %q, want usage that mentions oops and version", out)
+	for _, want := range []string{"Ctrl+Z for coding agents.", "undo [turn]", "init", "--json", "https://oops.sh/docs"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("help = %q, missing %q", out, want)
+		}
 	}
 }
 
@@ -58,9 +60,9 @@ func TestVersionRejectsArgs(t *testing.T) {
 
 func execute(t *testing.T, args ...string) (int, string) {
 	t.Helper()
-	var buf bytes.Buffer
-	code := run(NewRoot(), args, &buf, &buf)
-	return code, buf.String()
+	var stdout, stderr bytes.Buffer
+	code := ExecuteIO(args, strings.NewReader(""), &stdout, &stderr)
+	return code, stdout.String() + stderr.String()
 }
 
 func assertMetadata(t *testing.T, out string) {
