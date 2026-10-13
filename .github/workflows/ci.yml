@@ -129,18 +129,28 @@ jobs:
       - name: Filesystem is case-insensitive APFS
         if: matrix.fs == 'apfs'
         run: |
-          diskutil info "$GITHUB_WORKSPACE" | tee /tmp/oops-disk.txt
+          dev=$(df -P "$GITHUB_WORKSPACE" | awk 'NR==2 {print $1}')
+          diskutil info "$dev" | tee /tmp/oops-disk.txt
           grep -q 'APFS' /tmp/oops-disk.txt
           if grep -E -q 'File System Personality:.*Case-sensitive' /tmp/oops-disk.txt; then
             echo "expected the default case-insensitive APFS volume"
             exit 1
           fi
+          probe="$RUNNER_TEMP/oops-case-probe"
+          mkdir -p "$probe"
+          echo a > "$probe/File"
+          echo b > "$probe/file"
+          n=$(find "$probe" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')
+          rm -rf "$probe"
+          test "$n" = 1
 
       - name: Filesystem is NTFS
         if: matrix.fs == 'ntfs'
         shell: pwsh
         run: |
-          $out = fsutil fsinfo volumeinfo $env:GITHUB_WORKSPACE | Out-String
+          $root = [System.IO.Path]::GetPathRoot($env:GITHUB_WORKSPACE)
+          $out = fsutil fsinfo volumeinfo $root | Out-String
+          Write-Host "root=$root"
           Write-Host $out
           if ($out -notmatch 'NTFS') { exit 1 }
 
