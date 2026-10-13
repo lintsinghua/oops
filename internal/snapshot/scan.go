@@ -55,9 +55,11 @@ func Scan(ctx context.Context, st *store.Store, root string, opt Options) (*Resu
 	if opt.Prev == nil {
 		opt.Prev = &Cache{Entries: map[string]CacheEntry{}}
 	}
+	// The deadline is wall-clock time from the start of this scan. opt.Now is the
+	// caller's logical clock and can be far behind the filesystem.
 	deadline := time.Time{}
 	if opt.Timeout > 0 {
-		deadline = opt.Now.Add(opt.Timeout)
+		deadline = time.Now().Add(opt.Timeout)
 	}
 	rootNode := &memNode{kids: map[string]*memNode{}, entry: Entry{Kind: KindDir, Name: ""}}
 	// ScanTime is wall-clock so it can be compared with filesystem mtimes.
