@@ -1,0 +1,23 @@
+# Binaries and release artifacts
+bin/
+dist/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage output
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Go workspace and vendor
+vendor/
+
+# Editor and OS files
+.idea/
+.vscode/
+*.swp
+.DS_Store
