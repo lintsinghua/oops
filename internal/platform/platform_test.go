@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -17,7 +18,13 @@ func TestPathHelpers(t *testing.T) {
 	if Key("a/b") == "" || Same("a/b", "a/b") != true {
 		t.Fatal("key")
 	}
-	if !ForbiddenRoot("/") || !ForbiddenRoot("/etc") {
+	if runtime.GOOS == "windows" {
+		sys := os.Getenv("SystemRoot")
+		vol := filepath.VolumeName(sys)
+		if sys == "" || vol == "" || !ForbiddenRoot(sys) || !ForbiddenRoot(vol+`\`) {
+			t.Fatalf("forbidden windows sys=%q vol=%q", sys, vol)
+		}
+	} else if !ForbiddenRoot("/") || !ForbiddenRoot("/etc") {
 		t.Fatal("forbidden")
 	}
 	dir := t.TempDir()
@@ -77,6 +84,11 @@ func TestPathHelpers(t *testing.T) {
 	}
 	outside := filepath.Join(dir, "out")
 	if err := os.Symlink(t.TempDir(), outside); err != nil {
+		var errno syscall.Errno
+		if runtime.GOOS == "windows" && errors.As(err, &errno) && errno == 1314 {
+			t.Logf("symlink privilege: %v", err)
+			return
+		}
 		t.Fatal(err)
 	}
 	if _, err := SafeRel(dir, "out/file"); err == nil {

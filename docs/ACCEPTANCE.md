@@ -65,9 +65,9 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | §6.2 empty turn | PASS | `TestEmptyTurnAddsLittle` | Unchanged checkpoint adds at most 4 KB of objects |
 | §6.2 undo 1k | PASS | `TestUndoThousandFiles` | Under 1 s here, bound 2 s on Windows |
 | §6.2 list | PASS | `TestE2EListLimitsAndColumns` | |
-| §6.3 | PASS | `.github/workflows/ci.yml` | lint, vet, govulncheck, coverage gate, race on the hosted OS/arch matrix, cold-start and RSS bench smoke |
+| §6.3 | PASS | `.github/workflows/ci.yml` | lint, vet, govulncheck, coverage gate, race on the hosted matrix except windows/arm64, cold-start and RSS bench smoke |
 | §6.4 | PASS | `docs/commands.md`, `TestCommandReference` | Command help is generated from cobra. README, README.zh-CN, how-it-works, and schema.md are in the repo |
-| §6.1 matrix | PASS | `.github/workflows/ci.yml`, `internal/agents/testdata`, `scripts/covergate.py` | ubuntu-latest and ubuntu-24.04-arm (ext4), ubuntu-latest tmpfs, macos-latest and macos-15-intel (case-insensitive APFS), windows-latest and windows-11-arm (NTFS). Go 1.27.2 and 1.26.9. Coverage gate is 70% overall and 85% for store, snapshot, and restore. Hook fixtures drive `oops hook` in agent event order. macos-13 is no longer a hosted runner, so the Intel macOS leg is macos-15-intel |
+| §6.1 matrix | PASS | `.github/workflows/ci.yml`, `internal/agents/testdata`, `scripts/covergate.py` | ubuntu-latest and ubuntu-24.04-arm (ext4), ubuntu-latest tmpfs, macos-latest and macos-15-intel (case-insensitive APFS), windows-latest and windows-11-arm (NTFS). Go 1.27.2 and 1.26.9. Coverage gate is 70% overall and 85% for store, snapshot, and restore. Hook fixtures drive `oops hook` in agent event order. macos-13 is no longer a hosted runner, so the Intel macOS leg is macos-15-intel. `-race` runs on every leg except windows-11-arm, where Go reports that the race detector is not supported |
 | §6.2 cold start and RSS | PASS | `TestColdStart10k`, `TestScanRSS100k` | Cold start of 10,000 files / 300,000,000 bytes was 0.69 s (limit 3 s). Peak VmRSS while scanning 100,000 files was 119.5 MiB, 125,341,696 bytes (limit 150 MB). One sample each, 2026-10-13, 4 vCPU, Linux |
 
 ## Counts

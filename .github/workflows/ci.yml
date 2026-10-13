@@ -161,24 +161,20 @@ jobs:
         with:
           platform: x64
 
-      - name: Install MinGW (arm64)
-        if: runner.os == 'Windows' && runner.arch == 'ARM64'
-        shell: pwsh
-        run: |
-          $zip = Join-Path $env:RUNNER_TEMP "llvm-mingw.zip"
-          $dest = Join-Path $env:RUNNER_TEMP "llvm-mingw"
-          Invoke-WebRequest -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-aarch64.zip" -OutFile $zip
-          Expand-Archive $zip -DestinationPath $dest
-          $bin = Get-ChildItem -Path $dest -Recurse -Filter gcc.exe | Select-Object -First 1
-          if (-not $bin) { throw "gcc.exe not found in llvm-mingw" }
-          Add-Content -Path $env:GITHUB_PATH -Value $bin.DirectoryName
-
       - name: go test -race
-        if: matrix.fs != 'tmpfs'
+        if: matrix.fs != 'tmpfs' && !(runner.os == 'Windows' && runner.arch == 'ARM64')
         env:
           CGO_ENABLED: "1"
           GOTOOLCHAIN: local
         run: go test -race -count=1 ./...
+
+      # The Go race detector does not support windows/arm64.
+      - name: go test
+        if: runner.os == 'Windows' && runner.arch == 'ARM64'
+        env:
+          CGO_ENABLED: "0"
+          GOTOOLCHAIN: local
+        run: go test -count=1 ./...
 
       - name: go test -race on tmpfs
         if: matrix.fs == 'tmpfs'

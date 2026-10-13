@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,5 +53,11 @@ func loadFixture(t *testing.T, rel, root string) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return []byte(strings.ReplaceAll(string(b), "WORKDIR", root))
+	quoted, err := json.Marshal(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Windows paths contain backslashes, which are not raw JSON.
+	escaped := string(quoted[1 : len(quoted)-1])
+	return []byte(strings.ReplaceAll(string(b), "WORKDIR", escaped))
 }
