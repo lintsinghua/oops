@@ -31,7 +31,7 @@ Set Theme { "name": "oops", "background": "#0A0A0A", "foreground": "#EDEDED", "c
 Hide
 Type "export PS1='\[\e[90m\]~/code/shop\[\e[0m\] $ ' && rm -rf /tmp/oops-demo && mkdir -p /tmp/oops-demo && cd /tmp/oops-demo"
 Enter
-Type "git init -q && mkdir -p src scripts && for f in app cart checkout order payment; do echo \"export const $f = 1\" > src/$f.ts; done && echo 'API_KEY=dev' > .env && echo '.env' > .gitignore && git add -A >/dev/null && git commit -qm init && echo 'draft' > src/notes.ts"
+Type `git init -q && mkdir -p src scripts && for f in app cart checkout order payment; do echo "export const $f = 1" > src/$f.ts; done && echo 'API_KEY=dev' > .env && echo '.env' > .gitignore && git add -A >/dev/null && git commit -qm init && echo 'draft' > src/notes.ts`
 Enter
 Type "oops init -y --agent claude >/dev/null 2>&1; clear"
 Enter

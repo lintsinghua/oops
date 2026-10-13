@@ -21,9 +21,8 @@
   English · <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
-<!-- TODO(demo): record with `vhs vhs/demo.tape`, then replace this placeholder with assets/demo.gif -->
 <p align="center">
-  <img alt="An agent runs rm -rf src && git clean -fdx. Typing oops opens a timeline; one Enter brings every file back." src="assets/demo.gif" width="820">
+  <img alt="oops run wraps rm -rf src &amp;&amp; git clean -fdx. oops undo restores src and .env." src="assets/demo.gif" width="820">
 </p>
 
 ```sh
