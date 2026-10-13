@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/lintsinghua/oops/internal/agents"
+	"github.com/lintsinghua/oops/internal/engine"
 	"github.com/lintsinghua/oops/internal/platform"
 	"github.com/lintsinghua/oops/internal/tui"
 	"github.com/lintsinghua/oops/internal/ui"
@@ -18,7 +19,7 @@ import (
 )
 
 func newInitCmd(opt *options) *cobra.Command {
-	var yes, project, printOnly, undo bool
+	var yes, project, printOnly, undo, deleteData bool
 	var only []string
 	var pathExtra []string
 	cmd := &cobra.Command{
@@ -26,13 +27,14 @@ func newInitCmd(opt *options) *cobra.Command {
 		Short: "Connect oops to the agents on this machine",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return cmdInit(opt, yes, project, printOnly, undo, only, pathExtra)
+			return cmdInit(opt, yes, project, printOnly, undo, deleteData, only, pathExtra)
 		},
 	}
 	cmd.Flags().BoolVarP(&yes, "yes", "y", false, "Connect without asking")
 	cmd.Flags().BoolVar(&project, "project", false, "Write project config instead of user config")
 	cmd.Flags().BoolVar(&printOnly, "print", false, "Print the config fragment without writing it")
 	cmd.Flags().BoolVar(&undo, "undo", false, "Remove oops hooks")
+	cmd.Flags().BoolVar(&deleteData, "delete-data", false, "With --undo, also delete snapshot data")
 	cmd.Flags().StringArrayVar(&only, "agent", nil, "Only this agent (repeatable)")
 	cmd.Flags().StringArrayVar(&pathExtra, "path", nil, "Extra directories to search for agent binaries")
 	_ = cmd.Flags().MarkHidden("path")
@@ -44,7 +46,7 @@ type foundAgent struct {
 	inst  agents.Installation
 }
 
-func cmdInit(opt *options, yes, project, printOnly, undo bool, only, pathExtra []string) error {
+func cmdInit(opt *options, yes, project, printOnly, undo, deleteData bool, only, pathExtra []string) error {
 	user := opt.userHome
 	if user == "" {
 		var err error
@@ -82,7 +84,7 @@ func cmdInit(opt *options, yes, project, printOnly, undo bool, only, pathExtra [
 		exe = "oops"
 	}
 	if undo {
-		return cmdInitUndo(opt, rows, yes, project, user, projectDir)
+		return cmdInitUndo(opt, rows, yes, project, deleteData, user, projectDir)
 	}
 	if printOnly {
 		return cmdInitPrint(opt, rows, exe)
@@ -308,18 +310,17 @@ func cmdInitWrite(opt *options, rows []foundAgent, exe string, yes, project bool
 	}
 	fmt.Fprintln(opt.stdout)
 	fmt.Fprintln(opt.stdout, "  You're protected.")
+	fmt.Fprintln(opt.stdout, "  Undo this setup any time: oops init --undo")
 	oops := "oops"
 	if opt.colorOn() {
 		oops = st.Accent.Render("oops")
 	}
 	fmt.Fprintf(opt.stdout, "  When an agent breaks something, just type: %s\n", oops)
-	fmt.Fprintln(opt.stdout)
-	fmt.Fprintln(opt.stdout, "  Undo this setup any time: oops init --undo")
 	_ = problems
 	return nil
 }
 
-func cmdInitUndo(opt *options, rows []foundAgent, yes, project bool, user, projectDir string) error {
+func cmdInitUndo(opt *options, rows []foundAgent, yes, project, deleteData bool, user, projectDir string) error {
 	var present []foundAgent
 	for _, row := range rows {
 		if row.inst.Connected {
@@ -372,8 +373,47 @@ func cmdInitUndo(opt *options, rows []foundAgent, yes, project bool, user, proje
 	}
 	fmt.Fprintf(opt.stdout, "  %s Removed from %s.\n", sym.OK, ui.Plural(n, "agent", "agents"))
 	fmt.Fprintln(opt.stdout)
+	if deleteData {
+		if err := deleteSnapshotData(opt, yes); err != nil {
+			return err
+		}
+		return nil
+	}
 	fmt.Fprintf(opt.stdout, "  Snapshots kept (in %s).\n", dataHomeLine(opt))
 	fmt.Fprintln(opt.stdout, "  Delete them too: oops gc --all")
+	return nil
+}
+
+func deleteSnapshotData(opt *options, yes bool) error {
+	if !yes {
+		if !canAsk(opt) {
+			return fail(2, "oops init --undo --delete-data needs confirmation. Re-run with -y to proceed.")
+		}
+		fmt.Fprint(opt.stderr, "  Delete all oops snapshots too? [y/N] ")
+		ok, err := ask(opt.stdin, false)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fmt.Fprintln(opt.stdout, "  Snapshots kept.")
+			return nil
+		}
+	}
+	e, err := openEngine(opt)
+	if err != nil {
+		return err
+	}
+	defer e.Close()
+	list, err := e.DB.Workspaces()
+	if err != nil {
+		return err
+	}
+	for _, w := range list {
+		if _, err := e.GC(engine.Workspace{ID: w.ID, Path: w.Path}, false, true); err != nil {
+			return err
+		}
+	}
+	fmt.Fprintln(opt.stdout, "  Snapshots deleted.")
 	return nil
 }
 

@@ -24,6 +24,9 @@ type TurnInput struct {
 // StartTurn captures a pre snapshot and records a running turn.
 // An unfinished turn in the same session is closed first.
 func (e *Engine) StartTurn(ctx context.Context, in TurnInput) (meta.Turn, error) {
+	if err := e.WaitPending(ctx, in.Workspace); err != nil {
+		return meta.Turn{}, err
+	}
 	if in.Kind == "" {
 		in.Kind = "agent"
 	}
@@ -53,6 +56,9 @@ func (e *Engine) StartTurn(ctx context.Context, in TurnInput) (meta.Turn, error)
 
 // CloseTurn captures the post snapshot for the running session turn.
 func (e *Engine) CloseTurn(ctx context.Context, in TurnInput, late bool) (meta.Turn, error) {
+	if err := e.WaitPending(ctx, in.Workspace); err != nil {
+		return meta.Turn{}, err
+	}
 	t, err := e.DB.RunningBySession(in.Workspace.ID, in.SessionID)
 	if err != nil {
 		if meta.IsNotFound(err) {

@@ -28,7 +28,7 @@ Undo anything Claude Code, Codex, Gemini or Cursor did to your files. Even rm -r
 
   brew install oops-cli/tap/oops   ·   npm i -g @oops-cli/oops   ·   curl -fsSL https://oops.sh/install | sh
 ```
-（org、scope、域名均为占位，待注册后替换。）
+（计划中的渠道。org、scope、域名均为占位，待注册后替换。当前 README 只提供 `go install github.com/lintsinghua/oops/cmd/oops@latest` 和 GitHub Releases。）
 
 **安装**：三种渠道安装完成后的最后一句提示**完全一致**，只指向唯一的下一步：
 

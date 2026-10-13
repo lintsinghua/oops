@@ -151,7 +151,14 @@ func (e *Engine) Capture(ctx context.Context, ws Workspace, opt SnapOptions) (me
 	if err != nil {
 		return meta.Snapshot{}, nil, err
 	}
-	if err := res.Cache.Save(filepath.Join(e.wsDir(ws.ID), "statcache")); err != nil {
+	cachePath := filepath.Join(e.wsDir(ws.ID), "statcache")
+	if !res.Changed {
+		if err := res.Cache.Touch(cachePath); err != nil {
+			if err := res.Cache.Save(cachePath); err != nil {
+				return meta.Snapshot{}, nil, err
+			}
+		}
+	} else if err := res.Cache.Save(cachePath); err != nil {
 		return meta.Snapshot{}, nil, err
 	}
 	id, err := newID()

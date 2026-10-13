@@ -268,7 +268,7 @@ func writeListJSON(w io.Writer, ws engine.Workspace, turns []meta.Turn) error {
 
 func renderShow(w io.Writer, opt *options, t meta.Turn, changes []snapshot.Change) {
 	if opt.json {
-		_ = writeListJSON(w, engine.Workspace{}, []meta.Turn{t})
+		_ = writeShowJSON(w, t, changes)
 		return
 	}
 	st, sym := stylesOf(opt)
@@ -294,6 +294,45 @@ func renderShow(w io.Writer, opt *options, t meta.Turn, changes []snapshot.Chang
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Undo: oops undo %d      Diff: oops diff %d\n", t.Seq, t.Seq)
 	_ = st
+}
+
+func writeShowJSON(w io.Writer, t meta.Turn, changes []snapshot.Change) error {
+	type row struct {
+		Path       string `json:"path"`
+		Action     string `json:"action"`
+		Insertions int    `json:"insertions"`
+		Deletions  int    `json:"deletions"`
+		Binary     bool   `json:"binary,omitempty"`
+	}
+	files := make([]row, 0, len(changes))
+	for _, c := range changes {
+		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
+			continue
+		}
+		files = append(files, row{Path: c.Path, Action: c.Action, Insertions: c.Insertions, Deletions: c.Deletions, Binary: c.Binary})
+	}
+	ended := ""
+	if !t.EndedAt.IsZero() {
+		ended = t.EndedAt.Format(time.RFC3339)
+	}
+	out := struct {
+		SchemaVersion int        `json:"schema_version"`
+		Turn          int        `json:"turn"`
+		Agent         string     `json:"agent"`
+		Kind          string     `json:"kind"`
+		Status        string     `json:"status"`
+		StartedAt     string     `json:"started_at"`
+		EndedAt       string     `json:"ended_at,omitempty"`
+		Prompt        string     `json:"prompt"`
+		Stats         meta.Stats `json:"stats"`
+		Files         []row      `json:"files"`
+	}{
+		SchemaVersion: 1, Turn: t.Seq, Agent: t.Agent, Kind: t.Kind, Status: t.Status,
+		StartedAt: t.StartedAt.Format(time.RFC3339), EndedAt: ended, Prompt: t.Prompt, Stats: t.Stats, Files: files,
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func renderDry(w io.Writer, res engine.UndoResult, sym ui.Symbols, now time.Time) {

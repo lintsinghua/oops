@@ -1,11 +1,15 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -65,6 +69,10 @@ func cmdUndo(opt *options, seq int, files []string, dry, force, yes, running boo
 		return explain(s, seq, err)
 	}
 	if dry {
+		if opt.json {
+			writeUndoJSON(opt.stdout, res)
+			return nil
+		}
 		_, sym := stylesOf(opt)
 		renderDry(opt.stdout, res, sym, time.Now())
 		return nil
@@ -184,7 +192,8 @@ func cmdRewind(opt *options, seq int, dry, force, yes bool) error {
 }
 
 func newRedoCmd(opt *options) *cobra.Command {
-	return &cobra.Command{
+	var dry bool
+	cmd := &cobra.Command{
 		Use:   "redo",
 		Short: "Reverse the last undo, rewind or restore",
 		Args:  cobra.NoArgs,
@@ -194,17 +203,28 @@ func newRedoCmd(opt *options) *cobra.Command {
 				return err
 			}
 			defer s.e.Close()
-			res, err := s.e.Redo(context.Background(), s.ws)
+			res, err := s.e.Redo(context.Background(), s.ws, dry)
 			if err != nil {
 				if meta.IsNotFound(err) {
 					return fail(4, "Nothing to redo.")
 				}
 				return explain(s, 0, err)
 			}
+			if dry {
+				if opt.json {
+					writeUndoJSON(opt.stdout, res)
+					return nil
+				}
+				_, sym := stylesOf(opt)
+				renderDry(opt.stdout, res, sym, time.Now())
+				return nil
+			}
 			renderUndo(opt.stdout, opt, res, "redo")
 			return resultCode(res)
 		},
 	}
+	cmd.Flags().BoolVarP(&dry, "dry-run", "n", false, "Preview without changing files")
+	return cmd
 }
 
 func newRestoreCmd(opt *options) *cobra.Command {
@@ -390,9 +410,17 @@ func cmdShow(opt *options, seq int) error {
 		return err
 	}
 	var skipped []meta.Skipped
-	if post, row, err := s.e.Files(t.PostSnap); err == nil {
-		_ = post
-		skipped = row.Skipped
+	seen := map[string]bool{}
+	for _, id := range []string{t.PreSnap, t.PostSnap} {
+		if _, row, err := s.e.Files(id); err == nil {
+			for _, sk := range row.Skipped {
+				if seen[sk.Path] {
+					continue
+				}
+				seen[sk.Path] = true
+				skipped = append(skipped, sk)
+			}
+		}
 	}
 	renderShow(opt.stdout, opt, t, changes)
 	if !opt.json && !opt.quiet {
@@ -418,7 +446,6 @@ func newDiffCmd(opt *options) *cobra.Command {
 	cmd.Flags().BoolVar(&names, "name-only", false, "List paths only")
 	cmd.Flags().BoolVar(&reverse, "reverse", false, "Show the undo direction")
 	cmd.Flags().BoolVar(&noPager, "no-pager", false, "Print the diff without a pager")
-	_ = noPager
 	return cmd
 }
 
@@ -433,7 +460,7 @@ func splitSpec(args []string) (int, []string) {
 	return n, args[1:]
 }
 
-func cmdDiff(opt *options, seq int, paths []string, stat, names, reverse, _ bool) error {
+func cmdDiff(opt *options, seq int, paths []string, stat, names, reverse, noPager bool) error {
 	s, err := begin(opt)
 	if err != nil {
 		return err
@@ -453,16 +480,17 @@ func cmdDiff(opt *options, seq int, paths []string, stat, names, reverse, _ bool
 	if opt.json {
 		return writeDiffJSON(opt.stdout, t, changes)
 	}
+	var buf bytes.Buffer
 	if len(changes) == 0 {
-		fmt.Fprintln(opt.stdout, "No file changes.")
-		return nil
+		fmt.Fprintln(&buf, "No file changes.")
+		return pageOrPrint(opt, noPager, buf.Bytes())
 	}
 	for _, c := range changes {
 		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
 			continue
 		}
 		if names {
-			fmt.Fprintln(opt.stdout, c.Path)
+			fmt.Fprintln(&buf, c.Path)
 			continue
 		}
 		if stat {
@@ -472,7 +500,7 @@ func cmdDiff(opt *options, seq int, paths []string, stat, names, reverse, _ bool
 			} else if c.Insertions != 0 || c.Deletions != 0 {
 				extra = fmt.Sprintf("  +%d −%d", c.Insertions, c.Deletions)
 			}
-			fmt.Fprintf(opt.stdout, "%s %s%s\n", c.Action, c.Path, extra)
+			fmt.Fprintf(&buf, "%s %s%s\n", c.Action, c.Path, extra)
 			continue
 		}
 		oldB, newB := s.e.ReadBlob(c.Pre), s.e.ReadBlob(c.Post)
@@ -482,15 +510,40 @@ func cmdDiff(opt *options, seq int, paths []string, stat, names, reverse, _ bool
 			oldName, newName = newName, oldName
 		}
 		if c.Binary {
-			fmt.Fprintf(opt.stdout, "diff %s\n", c.Path)
+			fmt.Fprintf(&buf, "diff %s\n", c.Path)
 			continue
 		}
 		text, err := snapshot.Unified(oldName, newName, string(oldB), string(newB), 3)
 		if err != nil || text == "" {
-			fmt.Fprintf(opt.stdout, "%s %s\n", c.Action, c.Path)
+			fmt.Fprintf(&buf, "%s %s\n", c.Action, c.Path)
 			continue
 		}
-		fmt.Fprintln(opt.stdout, text)
+		fmt.Fprintln(&buf, text)
+	}
+	return pageOrPrint(opt, noPager, buf.Bytes())
+}
+
+func pageOrPrint(opt *options, noPager bool, b []byte) error {
+	lines := bytes.Count(b, []byte{'\n'})
+	if noPager || !isTTY(opt.stdout) || lines < 40 {
+		_, err := opt.stdout.Write(b)
+		return err
+	}
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		pager = "less"
+	}
+	var args []string
+	if filepath.Base(pager) == "less" {
+		args = []string{"-FRX"}
+	}
+	cmd := exec.Command(pager, args...)
+	cmd.Stdin = bytes.NewReader(b)
+	cmd.Stdout = opt.stdout
+	cmd.Stderr = opt.stderr
+	if err := cmd.Run(); err != nil {
+		_, werr := opt.stdout.Write(b)
+		return werr
 	}
 	return nil
 }
@@ -534,11 +587,20 @@ func writeDiffJSON(w io.Writer, t meta.Turn, changes []snapshot.Change) error {
 
 func newSnapCmd(opt *options) *cobra.Command {
 	var message string
+	var dry bool
 	cmd := &cobra.Command{
 		Use:   "snap",
 		Short: "Save a checkpoint now",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if dry {
+				if opt.json {
+					fmt.Fprintln(opt.stdout, `{"schema_version":1,"dry_run":true,"action":"snap"}`)
+					return nil
+				}
+				fmt.Fprintln(opt.stdout, "Dry run — would save a checkpoint. Nothing changed.")
+				return nil
+			}
 			s, err := begin(opt)
 			if err != nil {
 				return err
@@ -564,6 +626,7 @@ func newSnapCmd(opt *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVarP(&message, "message", "m", "", "Note stored with the checkpoint")
+	cmd.Flags().BoolVarP(&dry, "dry-run", "n", false, "Preview without writing a checkpoint")
 	return cmd
 }
 
@@ -685,6 +748,10 @@ func begin(opt *options) (*session, error) {
 	}
 	ws, err := loadWS(opt, e)
 	if err != nil {
+		_ = e.Close()
+		return nil, err
+	}
+	if err := e.WaitPending(context.Background(), ws); err != nil {
 		_ = e.Close()
 		return nil, err
 	}

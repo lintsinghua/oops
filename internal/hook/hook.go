@@ -19,6 +19,7 @@ import (
 // Options configures one hook invocation.
 type Options struct {
 	Home   string
+	Config string
 	Stdin  io.Reader
 	Stdout io.Writer
 	Stderr io.Writer
@@ -29,6 +30,16 @@ type Options struct {
 // never returned to the agent.
 func Run(args []string, opt Options) int {
 	defer func() { _ = recover() }()
+	// DisableFlagParsing puts parent flags in args. Honor --home so tests and
+	// `oops --home … hook` use the same data directory.
+	var flagHome, flagConfig string
+	flagHome, flagConfig, args = stripHookGlobals(args)
+	if opt.Home == "" {
+		opt.Home = flagHome
+	}
+	if opt.Config == "" {
+		opt.Config = flagConfig
+	}
 	if opt.Stdout == nil {
 		opt.Stdout = os.Stdout
 	}
@@ -43,7 +54,7 @@ func Run(args []string, opt Options) int {
 	}
 	body, _ := io.ReadAll(opt.Stdin)
 	ev := agents.Parse(args[0], args[1], body)
-	e, err := engine.Open(opt.Home, "", "", opt.Now)
+	e, err := engine.Open(opt.Home, "", opt.Config, opt.Now)
 	if err != nil {
 		return 0
 	}
@@ -54,6 +65,34 @@ func Run(args []string, opt Options) int {
 		e.Logf("hook %s %s: %v", ev.Agent, ev.Kind, err)
 	}
 	return 0
+}
+
+func stripHookGlobals(args []string) (home, config string, rest []string) {
+	for len(args) > 0 {
+		switch args[0] {
+		case "--home", "--dir", "--user-home", "--config", "--color":
+			if len(args) < 2 {
+				return home, config, args
+			}
+			switch args[0] {
+			case "--home":
+				home = args[1]
+			case "--config":
+				config = args[1]
+			}
+			args = args[2:]
+		case "--json", "--quiet", "-q", "--debug", "--accessible":
+			args = args[1:]
+		default:
+			if len(args[0]) > 7 && args[0][:7] == "--home=" {
+				home = args[0][7:]
+				args = args[1:]
+				continue
+			}
+			return home, config, args
+		}
+	}
+	return home, config, args
 }
 
 func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Writer) error {
@@ -104,11 +143,22 @@ func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Wr
 		}
 		return writeNotices(e, ws, ev, stdout)
 	case "end":
-		_, err = e.CloseTurn(ctx, in, false)
-		if err != nil {
-			return err
+		if qerr := e.QueueFinish(ws, ev.SessionID, false); qerr != nil {
+			_, err = e.CloseTurn(ctx, in, false)
+			if err != nil {
+				return err
+			}
+			return writeNotices(e, ws, ev, stdout)
+		}
+		if !spawnFinish(e.Home) {
+			if err = e.FinishPending(ctx, ws); err != nil {
+				return err
+			}
 		}
 		return writeNotices(e, ws, ev, stdout)
+	case "subagent":
+		e.Logf("subagent-stop agent=%s session=%s", ev.Agent, ev.SessionID)
+		return nil
 	case "step":
 		if _, err := e.DB.RunningBySession(ws.ID, ev.SessionID); err != nil {
 			if _, err2 := e.StartTurn(ctx, in); err2 != nil {

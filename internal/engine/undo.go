@@ -40,6 +40,9 @@ type UndoResult struct {
 
 // Undo reverses one finished turn.
 func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) {
+	if err := e.WaitPending(ctx, req.Workspace); err != nil {
+		return UndoResult{}, err
+	}
 	t, err := e.turnForUndo(ctx, req)
 	if err != nil {
 		return UndoResult{}, err
@@ -112,6 +115,9 @@ func (e *Engine) turnForUndo(ctx context.Context, req UndoRequest) (meta.Turn, e
 
 // Rewind moves the workspace to just before seq.
 func (e *Engine) Rewind(ctx context.Context, ws Workspace, seq int, force, dry bool) (UndoResult, error) {
+	if err := e.WaitPending(ctx, ws); err != nil {
+		return UndoResult{}, err
+	}
 	turns, err := e.turnsFrom(ws, seq)
 	if err != nil {
 		return UndoResult{}, err
@@ -246,8 +252,11 @@ func (e *Engine) RestoreFiles(ctx context.Context, ws Workspace, seq int, paths 
 	return res, nil
 }
 
-// Redo inverts the latest applied operation.
-func (e *Engine) Redo(ctx context.Context, ws Workspace) (UndoResult, error) {
+// Redo inverts the latest applied operation. dry reports the plan and writes nothing.
+func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, error) {
+	if err := e.WaitPending(ctx, ws); err != nil {
+		return UndoResult{}, err
+	}
 	op, err := e.DB.LatestAppliedOp(ws.ID)
 	if err != nil {
 		return UndoResult{}, err
@@ -275,7 +284,10 @@ func (e *Engine) Redo(ctx context.Context, ws Workspace) (UndoResult, error) {
 		}
 		items = append(items, restore.Item{Path: ef.Path, Op: opName, Before: now, Want: ef.Before, After: ef.Before})
 	}
-	res := UndoResult{Result: resultOf(items), Effects: effects(items), Seqs: op.Targets}
+	res := UndoResult{Result: resultOf(items), Effects: effects(items), Seqs: op.Targets, DryRun: dry}
+	if dry || hasKept(items) {
+		return res, nil
+	}
 	if err := e.apply(ctx, ws, "redo", op.Targets, curSnap.ID, items); err != nil {
 		return res, err
 	}
@@ -429,6 +441,9 @@ func (p *PathError) Error() string { return "path is not part of the turn" }
 
 // ManualSnap records a checkpoint where pre and post are the current tree.
 func (e *Engine) ManualSnap(ctx context.Context, ws Workspace, message string) (meta.Turn, error) {
+	if err := e.WaitPending(ctx, ws); err != nil {
+		return meta.Turn{}, err
+	}
 	snap, _, err := e.Capture(ctx, ws, SnapOptions{})
 	if err != nil {
 		return meta.Turn{}, err
