@@ -236,6 +236,17 @@ func SecureMkdir(path string) error {
 
 // WriteFileAtomic writes data to path via a temp file, fsync, and rename.
 func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
+	return writeFileAtomic(path, data, mode, true)
+}
+
+// WriteFileAtomicUnsynced writes via a temp file and rename. The caller syncs
+// the directory once after a batch. Per-file fsync makes a 1,000-file undo
+// miss the PRD limit on Windows.
+func WriteFileAtomicUnsynced(path string, data []byte, mode os.FileMode) error {
+	return writeFileAtomic(path, data, mode, false)
+}
+
+func writeFileAtomic(path string, data []byte, mode os.FileMode, sync bool) error {
 	if err := SecureMkdir(filepath.Dir(path)); err != nil {
 		return err
 	}
@@ -254,9 +265,11 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 		_ = tmp.Close()
 		return err
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
+	if sync {
+		if err := tmp.Sync(); err != nil {
+			_ = tmp.Close()
+			return err
+		}
 	}
 	if err := tmp.Close(); err != nil {
 		return err
@@ -271,6 +284,20 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	ok = true
+	return nil
+}
+
+// SyncDir flushes directory entries. Windows directory handles often reject
+// this; a failure there is ignored because the bytes are already renamed.
+func SyncDir(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil && runtime.GOOS != "windows" {
+		return err
+	}
 	return nil
 }
 

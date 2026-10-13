@@ -107,10 +107,15 @@ func (s *Store) Put(raw []byte) (ID, error) {
 		return id, nil
 	}
 	compressed := s.enc.EncodeAll(raw, nil)
-	if err := platform.WriteFileAtomic(s.path(id), compressed, 0o600); err != nil {
+	if err := platform.WriteFileAtomicUnsynced(s.path(id), compressed, 0o600); err != nil {
 		return ID{}, err
 	}
 	return id, nil
+}
+
+// Sync flushes the object directory after a batch of puts.
+func (s *Store) Sync() error {
+	return platform.SyncDir(s.root)
 }
 
 // Get reads and decompresses an object.
