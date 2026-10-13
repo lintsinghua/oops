@@ -64,6 +64,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | §6.2 background completion | PASS | `TestHotCapturePercentiles` | In-process Capture after the hook has returned: 82 ms / 91 ms at 10k, 0.82 s / 3.5 s at 100k |
 | §6.2 empty turn | PASS | `TestEmptyTurnAddsLittle` | Unchanged checkpoint adds at most 4 KB of objects |
 | §6.2 undo 1k | PASS | `TestUndoThousandFiles` | Under 1 s here, bound 2 s on Windows |
+| §6.1 kill mid-undo | PASS | `TestKillDuringUndoRecovers` | The process is killed after the safety snapshot and pending journal are on disk and the apply has started. Each file is a complete version. The next command finishes the restore |
 | §6.2 list | PASS | `TestE2EListLimitsAndColumns` | |
 | §6.3 | PASS | `.github/workflows/ci.yml` | lint, vet, govulncheck, coverage gate, race on the hosted matrix except windows/arm64, cold-start and RSS bench smoke |
 | §6.4 | PASS | `docs/commands.md`, `TestCommandReference` | Command help is generated from cobra. README, README.zh-CN, how-it-works, and schema.md are in the repo |
@@ -74,7 +75,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 
 | Result | Rows |
 |---|---|
-| PASS | 65 |
+| PASS | 66 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action
