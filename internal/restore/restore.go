@@ -294,7 +294,9 @@ func writeOne(root string, st *store.Store, it Item) error {
 		if mode == 0 {
 			mode = 0o644
 		}
-		return platform.WriteFileInPlace(full, raw, mode)
+		// Temp file in the same directory, then rename. A crash cannot leave a
+		// truncated user file; the old bytes stay until the rename commits.
+		return platform.WriteFileAtomicUnsynced(full, raw, mode)
 	}
 }
 
@@ -307,7 +309,9 @@ type BusyError struct {
 func (e *BusyError) Error() string { return e.Err.Error() }
 func (e *BusyError) Unwrap() error { return e.Err }
 
-// Journal is an in-progress restore.
+// Journal is an in-progress restore. It is written before any user file is
+// replaced, and it carries the safety snapshot so a later process can finish
+// the apply or roll it back.
 type Journal struct {
 	Status     string    `json:"status"`
 	WS         string    `json:"ws"`
@@ -315,6 +319,10 @@ type Journal struct {
 	Items      []Item    `json:"items"`
 	CreatedAt  time.Time `json:"created_at"`
 	Message    string    `json:"message,omitempty"`
+	Kind       string    `json:"kind,omitempty"`
+	Seqs       []int     `json:"seqs,omitempty"`
+	Applied    bool      `json:"applied,omitempty"`
+	MarkUndone bool      `json:"mark_undone,omitempty"`
 }
 
 // WriteJournal stores a journal atomically.

@@ -252,17 +252,12 @@ func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
 	return writeFileAtomic(path, data, mode, true)
 }
 
-// WriteFileAtomicUnsynced writes via a temp file and rename, without flushing
-// each file. The caller syncs the directory once after a batch. Object blobs
-// use this so a crash cannot leave a partial object in place.
+// WriteFileAtomicUnsynced writes via a temp file in the same directory and
+// renames it over the destination, without flushing each file. The caller
+// syncs the directory once after a batch. The rename is what makes a crash
+// unable to leave a truncated user file.
 func WriteFileAtomicUnsynced(path string, data []byte, mode os.FileMode) error {
 	return writeFileAtomic(path, data, mode, false)
-}
-
-// WriteFileInPlace replaces a workspace file without a temp name. Restore uses
-// it for a batch, then syncs the directory once.
-func WriteFileInPlace(path string, data []byte, mode os.FileMode) error {
-	return writeFileInPlace(path, data, mode)
 }
 
 func writeFileAtomic(path string, data []byte, mode os.FileMode, sync bool) error {
@@ -303,38 +298,6 @@ func writeFileAtomic(path string, data []byte, mode os.FileMode, sync bool) erro
 		return err
 	}
 	ok = true
-	return nil
-}
-
-// writeFileInPlace replaces path without a temp file or a per-file disk flush.
-// A batch calls SyncDir once after every path is written. A symlink at path is
-// removed first so the write does not follow it.
-func writeFileInPlace(path string, data []byte, mode os.FileMode) error {
-	if err := SecureMkdir(filepath.Dir(path)); err != nil {
-		return err
-	}
-	if st, err := os.Lstat(path); err == nil && st.Mode()&os.ModeSymlink != 0 {
-		if err := os.Remove(path); err != nil {
-			return err
-		}
-	}
-	if mode == 0 {
-		mode = 0o600
-	}
-	f, err := os.OpenFile(LongPath(path), os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
-	if err != nil {
-		return err
-	}
-	if _, err := f.Write(data); err != nil {
-		_ = f.Close()
-		return err
-	}
-	if err := f.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(path, mode); err != nil && runtime.GOOS != "windows" {
-		return err
-	}
 	return nil
 }
 

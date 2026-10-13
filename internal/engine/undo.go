@@ -92,7 +92,7 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 	if err := e.DB.DiscardUnapplied(req.Workspace.ID); err != nil {
 		return res, err
 	}
-	if err := e.apply(ctx, req.Workspace, "undo", []int{t.Seq}, curSnap.ID, items, true); err != nil {
+	if err := e.apply(ctx, req.Workspace, "undo", []int{t.Seq}, curSnap.ID, items, true, len(req.Files) == 0 && !hasKept(items)); err != nil {
 		return res, err
 	}
 	if len(req.Files) == 0 && !hasKept(items) {
@@ -202,7 +202,7 @@ func (e *Engine) Rewind(ctx context.Context, ws Workspace, seq int, force, dry b
 	if err := e.DB.DiscardUnapplied(ws.ID); err != nil {
 		return res, err
 	}
-	if err := e.apply(ctx, ws, "rewind", seqs, curSnap.ID, items, true); err != nil {
+	if err := e.apply(ctx, ws, "rewind", seqs, curSnap.ID, items, true, true); err != nil {
 		return res, err
 	}
 	for _, t := range turns {
@@ -285,7 +285,7 @@ func (e *Engine) RestoreFiles(ctx context.Context, ws Workspace, seq int, paths 
 	if err := e.DB.DiscardUnapplied(ws.ID); err != nil {
 		return res, err
 	}
-	if err := e.apply(ctx, ws, "restore", []int{seq}, curSnap.ID, items, true); err != nil {
+	if err := e.apply(ctx, ws, "restore", []int{seq}, curSnap.ID, items, true, false); err != nil {
 		return res, err
 	}
 	return res, nil
@@ -330,7 +330,7 @@ func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, 
 	if dry || hasKept(items) {
 		return res, nil
 	}
-	if err := e.apply(ctx, ws, "redo", op.Targets, curSnap.ID, items, false); err != nil {
+	if err := e.apply(ctx, ws, "redo", op.Targets, curSnap.ID, items, false, false); err != nil {
 		return res, err
 	}
 	if err := e.DB.MoveToRedoStack(op); err != nil {
@@ -391,7 +391,9 @@ func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool
 	if dry || hasKept(items) {
 		return res, nil
 	}
-	if err := e.restoreItems(ws, curSnap.ID, items); err != nil {
+	if err := e.restoreItems(ws, restore.Journal{
+		SafetySnap: curSnap.ID, Kind: op.Type, Seqs: op.Targets, Applied: true, MarkUndone: op.Type != "restore",
+	}, items); err != nil {
 		return res, err
 	}
 	if err := e.DB.SetOpApplied(op.ID, true); err != nil {
@@ -404,35 +406,47 @@ func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool
 			}
 		}
 	}
+	if err := e.commitJournal(ws); err != nil {
+		return res, err
+	}
 	return res, nil
 }
 
-func (e *Engine) apply(ctx context.Context, ws Workspace, kind string, seqs []int, safety string, items []restore.Item, applied bool) error {
-	if err := e.restoreItems(ws, safety, items); err != nil {
+func (e *Engine) apply(ctx context.Context, ws Workspace, kind string, seqs []int, safety string, items []restore.Item, applied, markUndone bool) error {
+	if err := e.restoreItems(ws, restore.Journal{
+		SafetySnap: safety, Kind: kind, Seqs: seqs, Applied: applied, MarkUndone: markUndone,
+	}, items); err != nil {
 		return err
 	}
 	_ = ctx
-	detail, err := json.Marshal(opDetail{Items: items})
-	if err != nil {
+	if err := e.recordJournalOp(restore.Journal{
+		WS: ws.ID, SafetySnap: safety, Kind: kind, Seqs: seqs, Applied: applied, MarkUndone: markUndone,
+		Items: items, CreatedAt: e.Now,
+	}); err != nil {
 		return err
 	}
-	_, err = e.DB.InsertOp(meta.Op{
-		WS: ws.ID, Type: kind, Targets: seqs, SafetySnap: safety,
-		CreatedAt: e.Now, Status: "committed", Detail: string(detail), Applied: applied,
-	})
-	return err
+	return e.commitJournal(ws)
 }
 
-func (e *Engine) restoreItems(ws Workspace, safety string, items []restore.Item) error {
+func (e *Engine) restoreItems(ws Workspace, j restore.Journal, items []restore.Item) error {
 	jpath := filepath.Join(e.wsDir(ws.ID), "journal", "current.json")
 	if err := os.MkdirAll(filepath.Dir(jpath), 0o700); err != nil {
 		return err
 	}
-	j := restore.Journal{Status: "pending", WS: ws.ID, SafetySnap: safety, Items: items, CreatedAt: e.Now}
+	j.Status = "pending"
+	j.WS = ws.ID
+	j.Items = items
+	j.CreatedAt = e.Now
 	if err := restore.WriteJournal(jpath, j); err != nil {
 		return err
 	}
-	if err := restore.Apply(ws.Path, e.Store, items); err != nil {
+	return restore.Apply(ws.Path, e.Store, items)
+}
+
+func (e *Engine) commitJournal(ws Workspace) error {
+	jpath := filepath.Join(e.wsDir(ws.ID), "journal", "current.json")
+	j, err := restore.ReadJournal(jpath)
+	if err != nil {
 		return err
 	}
 	j.Status = "committed"
@@ -470,10 +484,55 @@ func (e *Engine) ResumeJournal(ctx context.Context, ws Workspace) (string, error
 		_ = os.Remove(jpath)
 		return "rolled-back", err
 	}
+	if err := e.recordJournalOp(j); err != nil {
+		return "finished", err
+	}
 	j.Status = "committed"
-	_ = restore.WriteJournal(jpath, j)
+	if err := restore.WriteJournal(jpath, j); err != nil {
+		return "finished", err
+	}
 	_ = ctx
 	return "finished", nil
+}
+
+// recordJournalOp stores the undo operation once. A resume after a crash calls
+// it again; an operation for the same safety snapshot is left as it is.
+func (e *Engine) recordJournalOp(j restore.Journal) error {
+	if j.Kind == "" || j.SafetySnap == "" {
+		return nil
+	}
+	ops, err := e.DB.ListOps(j.WS, 0)
+	if err != nil {
+		return err
+	}
+	for _, op := range ops {
+		if op.SafetySnap == j.SafetySnap && op.Type == j.Kind && op.Status != "discarded" {
+			return nil
+		}
+	}
+	detail, err := json.Marshal(opDetail{Items: j.Items})
+	if err != nil {
+		return err
+	}
+	if _, err := e.DB.InsertOp(meta.Op{
+		WS: j.WS, Type: j.Kind, Targets: j.Seqs, SafetySnap: j.SafetySnap,
+		CreatedAt: j.CreatedAt, Status: "committed", Detail: string(detail), Applied: j.Applied,
+	}); err != nil {
+		return err
+	}
+	if !j.MarkUndone {
+		return nil
+	}
+	for _, seq := range j.Seqs {
+		t, err := e.DB.GetTurn(j.WS, seq)
+		if err != nil {
+			continue
+		}
+		if err := e.DB.SetStatus(t.ID, "undone"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func changePaths(changes []snapshot.Change) []string {
