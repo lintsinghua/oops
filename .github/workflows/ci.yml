@@ -22,7 +22,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: "1.27.2"
           cache: true
 
       - name: gofmt
@@ -42,16 +42,9 @@ jobs:
           version: v2.14.0
           args: --timeout=5m
 
-  test:
-    name: test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - macos-latest
-          - windows-latest
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -59,17 +52,127 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: "1.27.2"
           cache: true
 
-      # The race detector requires cgo. Windows runners do not ship gcc.
+      - name: Test with coverage
+        run: go test -count=1 -coverpkg=./... -coverprofile=coverage.out ./...
+
+      - name: Coverage gate
+        run: python3 scripts/covergate.py coverage.out
+
+  bench:
+    name: bench smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: "1.27.2"
+          cache: true
+
+      # Cold start of a 10k-file / 300 MB tree must be <= 3s.
+      # Peak RSS while scanning 100k files must be <= 150 MB.
+      - name: Cold start and scan RSS
+        env:
+          OOPS_PERF: "1"
+        run: go test -count=1 -timeout 20m -run 'TestColdStart10k|TestScanRSS100k' ./internal/engine/
+
+  test:
+    name: test (${{ matrix.os }}, go ${{ matrix.go }}, ${{ matrix.fs }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, go: "1.27.2", fs: ext4 }
+          - { os: ubuntu-latest, go: "1.26.9", fs: ext4 }
+          - { os: ubuntu-latest, go: "1.27.2", fs: tmpfs }
+          - { os: ubuntu-24.04-arm, go: "1.27.2", fs: ext4 }
+          - { os: ubuntu-24.04-arm, go: "1.26.9", fs: ext4 }
+          - { os: macos-latest, go: "1.27.2", fs: apfs }
+          - { os: macos-latest, go: "1.26.9", fs: apfs }
+          - { os: macos-15-intel, go: "1.27.2", fs: apfs }
+          - { os: macos-15-intel, go: "1.26.9", fs: apfs }
+          - { os: windows-latest, go: "1.27.2", fs: ntfs }
+          - { os: windows-latest, go: "1.26.9", fs: ntfs }
+          - { os: windows-11-arm, go: "1.27.2", fs: ntfs }
+          - { os: windows-11-arm, go: "1.26.9", fs: ntfs }
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.go }}
+          cache: true
+
+      - name: Filesystem is ext4
+        if: matrix.fs == 'ext4'
+        run: |
+          fstype=$(findmnt -T "$GITHUB_WORKSPACE" -n -o FSTYPE)
+          echo "fstype=$fstype"
+          test "$fstype" = ext4
+
+      - name: Mount tmpfs for test files
+        if: matrix.fs == 'tmpfs'
+        run: |
+          sudo mkdir -p /mnt/oops-tmpfs
+          sudo mount -t tmpfs -o size=4G tmpfs /mnt/oops-tmpfs
+          sudo chmod 1777 /mnt/oops-tmpfs
+          findmnt -T /mnt/oops-tmpfs -n -o FSTYPE | grep -qx tmpfs
+
+      - name: Filesystem is case-insensitive APFS
+        if: matrix.fs == 'apfs'
+        run: |
+          diskutil info "$GITHUB_WORKSPACE" | tee /tmp/oops-disk.txt
+          grep -q 'APFS' /tmp/oops-disk.txt
+          if grep -E -q 'File System Personality:.*Case-sensitive' /tmp/oops-disk.txt; then
+            echo "expected the default case-insensitive APFS volume"
+            exit 1
+          fi
+
+      - name: Filesystem is NTFS
+        if: matrix.fs == 'ntfs'
+        shell: pwsh
+        run: |
+          $out = fsutil fsinfo volumeinfo $env:GITHUB_WORKSPACE | Out-String
+          Write-Host $out
+          if ($out -notmatch 'NTFS') { exit 1 }
+
       - name: Install MinGW
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && runner.arch == 'X64'
         uses: egor-tensin/setup-mingw@v3
         with:
           platform: x64
 
+      - name: Install MinGW (arm64)
+        if: runner.os == 'Windows' && runner.arch == 'ARM64'
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "llvm-mingw.zip"
+          $dest = Join-Path $env:RUNNER_TEMP "llvm-mingw"
+          Invoke-WebRequest -Uri "https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/llvm-mingw-20261006-ucrt-aarch64.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath $dest
+          $bin = Get-ChildItem -Path $dest -Recurse -Filter gcc.exe | Select-Object -First 1
+          if (-not $bin) { throw "gcc.exe not found in llvm-mingw" }
+          Add-Content -Path $env:GITHUB_PATH -Value $bin.DirectoryName
+
       - name: go test -race
+        if: matrix.fs != 'tmpfs'
         env:
           CGO_ENABLED: "1"
-        run: go test -race ./...
+          GOTOOLCHAIN: local
+        run: go test -race -count=1 ./...
+
+      - name: go test -race on tmpfs
+        if: matrix.fs == 'tmpfs'
+        env:
+          CGO_ENABLED: "1"
+          GOTOOLCHAIN: local
+          TMPDIR: /mnt/oops-tmpfs
+        run: go test -race -count=1 ./...

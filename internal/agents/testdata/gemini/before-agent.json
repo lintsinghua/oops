@@ -1,0 +1,6 @@
+{
+  "hook_event_name": "BeforeAgent",
+  "session_id": "sess-gemini-1",
+  "cwd": "WORKDIR",
+  "prompt": "write the notes"
+}

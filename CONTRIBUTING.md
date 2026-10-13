@@ -4,7 +4,7 @@ Thanks for helping with oops. Bug reports, agent adapters, and docs fixes are al
 
 ## Prerequisites
 
-- Go 1.27.2
+- Go 1.27.2 (stable) or 1.26.9 (oldstable). `go.mod` allows 1.26.0 and newer. CI runs both 1.27.2 and 1.26.9.
 - [golangci-lint](https://golangci-lint.run/) v2.14.0
 - GNU make
 

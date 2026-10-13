@@ -211,6 +211,8 @@ oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因
 | 100,000 | 0.86 s | 0.92 s |
 
 同一次测量里，10 万文件的进程内 Capture p95 是 3.5 s，turn-start hook 的 p95 是 0.92 s。两组都是同一台机器、同一天、21 个样本的 nearest-rank。如果上一张 post 快照还在写，turn-start hook 会先等它，上限 30 秒（`TestWaitPendingBounded`）。任务已经完成时，这段额外等待不到 50 ms。后台进程死掉不会丢掉这一轮：任务文件会留到后面的命令把 post 快照写完（`TestCrashedChildFinishesTurn`）。
+
+**冷启动和扫描时的内存。** `TestColdStart10k` 计时的是对 10,000 个文件、合计 300,000,000 字节做的第一次进程内 Capture。这台机器上是 2.53 s（PRD 在 Linux 上的上限是 3 s）。`TestScanRSS100k` 在扫描 100,000 个文件时采样 VmRSS，峰值 68.3 MiB，即 71,663,616 字节（PRD 上限是 150 MB）。同一台机器、同一天。这两个数各是一次采样，不是百分位。
 </details>
 
 <details>

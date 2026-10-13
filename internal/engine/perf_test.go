@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -200,6 +202,137 @@ func hotCapturePercentiles(t *testing.T, n, samples int) (time.Duration, time.Du
 	}
 	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
 	return durs[10], durs[19]
+}
+
+// TestColdStart10k times the first Capture of a 10k-file tree of about 300 MB.
+// The timer starts at Capture and stops when it returns. Building the tree is
+// not included. The PRD limit is 3s on Linux and macOS, 6s on Windows.
+//
+// Run: OOPS_PERF=1 go test -count=1 -timeout 20m -run 'TestColdStart10k|TestScanRSS100k' ./internal/engine/
+func TestColdStart10k(t *testing.T) {
+	if os.Getenv("OOPS_PERF") != "1" {
+		t.Skip("set OOPS_PERF=1 to measure cold start")
+	}
+	const files = 10_000
+	const each = 30_000
+	root := t.TempDir()
+	bytes := writePerfTree(t, root, files, each)
+	e, ws := openPerfEngine(t, root)
+	debug.FreeOSMemory()
+	ctx := context.Background()
+	start := time.Now()
+	if _, _, err := e.Capture(ctx, ws, SnapOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	d := time.Since(start)
+	fmt.Printf("OOPS_COLD files=%d bytes=%d duration=%s goos=%s goarch=%s ncpu=%d\n", files, bytes, d, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+	t.Logf("cold files=%d bytes=%d duration=%s", files, bytes, d)
+	limit := 3 * time.Second
+	if runtime.GOOS == "windows" {
+		limit = 6 * time.Second
+	}
+	if d > limit {
+		t.Fatalf("cold start %s exceeds %s", d, limit)
+	}
+}
+
+// TestScanRSS100k records peak resident memory while scanning 100k files.
+// The PRD limit is 150 MB on every OS. Peak is sampled from VmRSS on Linux
+// and from ru_maxrss elsewhere, during Capture only.
+func TestScanRSS100k(t *testing.T) {
+	if os.Getenv("OOPS_PERF") != "1" {
+		t.Skip("set OOPS_PERF=1 to measure scan RSS")
+	}
+	const files = 100_000
+	root := t.TempDir()
+	bytes := writePerfTree(t, root, files, 32)
+	e, ws := openPerfEngine(t, root)
+	debug.FreeOSMemory()
+	stop := make(chan struct{})
+	var peak atomic.Uint64
+	go func() {
+		tick := time.NewTicker(5 * time.Millisecond)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stop:
+				if n := residentBytes(); n > peak.Load() {
+					peak.Store(n)
+				}
+				return
+			case <-tick.C:
+				if n := residentBytes(); n > peak.Load() {
+					peak.Store(n)
+				}
+			}
+		}
+	}()
+	ctx := context.Background()
+	start := time.Now()
+	if _, _, err := e.Capture(ctx, ws, SnapOptions{}); err != nil {
+		close(stop)
+		t.Fatal(err)
+	}
+	d := time.Since(start)
+	close(stop)
+	time.Sleep(20 * time.Millisecond)
+	rss := peak.Load()
+	fmt.Printf("OOPS_RSS files=%d bytes=%d duration=%s rss=%d goos=%s goarch=%s ncpu=%d\n", files, bytes, d, rss, runtime.GOOS, runtime.GOARCH, runtime.NumCPU())
+	t.Logf("rss files=%d bytes=%d duration=%s rss=%d", files, bytes, d, rss)
+	const limit = 150 << 20
+	if rss == 0 {
+		t.Fatal("resident memory was not readable")
+	}
+	if rss > limit {
+		t.Fatalf("peak RSS %d exceeds %d", rss, limit)
+	}
+}
+
+func writePerfTree(t *testing.T, root string, n, each int) int64 {
+	t.Helper()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const dirs = 200
+	for d := 0; d < dirs; d++ {
+		if err := os.MkdirAll(filepath.Join(root, fmt.Sprintf("d%03d", d)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := make([]byte, each)
+	for i := range body {
+		body[i] = byte('a' + (i % 23))
+	}
+	var total int64
+	for i := 0; i < n; i++ {
+		dir := filepath.Join(root, fmt.Sprintf("d%03d", i%dirs))
+		name := filepath.Join(dir, fmt.Sprintf("f%05d.txt", i/dirs))
+		// A unique prefix keeps each object distinct without a second buffer.
+		prefix := fmt.Sprintf("%08d\n", i)
+		if each >= len(prefix) {
+			copy(body, prefix)
+		}
+		if err := os.WriteFile(name, body, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		total += int64(len(body))
+	}
+	return total
+}
+
+func openPerfEngine(t *testing.T, root string) (*Engine, Workspace) {
+	t.Helper()
+	home := t.TempDir()
+	e, err := Open(home, t.TempDir(), filepath.Join(home, "no-config.toml"), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = e.Close() })
+	ws, err := e.Resolve(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return e, ws
 }
 
 func openPerfWorkspace(tb testing.TB, n int) (*Engine, Workspace) {
