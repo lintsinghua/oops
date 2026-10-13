@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/oops-wordmark-dark.svg">
-    <img alt="oops" src="brand/logo/oops-wordmark.svg" height="64">
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/wordmark-dark.svg">
+    <img alt="oops" src="brand/logo/wordmark-light.svg" height="64">
   </picture>
 </p>
 
@@ -30,7 +30,7 @@ go install github.com/lintsinghua/oops/cmd/oops@latest
 oops init                         # connect your agents once — then forget about it
 ```
 
-Homebrew (`oops-cli/tap`) and npm (`@oops-cli/oops`) are not registered yet.
+Homebrew (`oops-cli/tap`), npm (`@oops-cli/oops`), and a curl install script are not available yet.
 
 ---
 
@@ -54,10 +54,11 @@ oops works one level lower, at the file system. Whatever the agent used — its 
 |---|---|
 | Go | `go install github.com/lintsinghua/oops/cmd/oops@latest` |
 | Binaries | [GitHub Releases](https://github.com/lintsinghua/oops/releases) — macOS, Linux, Windows · amd64 / arm64 |
-| Homebrew | Coming soon. `oops-cli/tap` is not registered yet (`brew install oops-cli/tap/oops`). |
-| npm | Coming soon. `@oops-cli/oops` is not registered yet (`npm i -g @oops-cli/oops`). |
+| Homebrew | Coming soon. The `oops-cli/tap` name is not registered. |
+| npm | Coming soon. The `@oops-cli/oops` package is not registered. |
+| Install script | Coming soon. There is no curl installer. |
 
-GitHub Release archives are tar.gz (zip on Windows) plus `checksums.txt` (sha256). The current GoReleaser config does not cosign-sign artifacts or attach an SBOM or SLSA provenance. There is no `curl | sh` installer, Scoop manifest, or winget manifest yet.
+GitHub Release archives are tar.gz (zip on Windows) plus `checksums.txt` (sha256). The current GoReleaser config does not cosign-sign artifacts or attach an SBOM or SLSA provenance. Scoop and winget manifests are not published.
 
 ## 30-second start
 
@@ -184,7 +185,7 @@ oops doesn't replace your agent's checkpoints — it covers what they miss. Use 
 | History kept | 100 checkpoints / session, ~30 days | — | — | 500 turns or 30 days when you run `oops gc` |
 | Rewinds the conversation | ✓ | — | ✓ | ✗ (not a goal) |
 
-<sub>✓ yes · ✗ no · — not applicable or not documented. Sources: [Claude Code checkpointing docs](https://code.claude.com/docs/en/checkpointing), [openai/codex PR #19481](https://github.com/openai/codex/pull/19481). The other-tool cells were written 2026-10-14 and were not re-checked for this change. oops does not install a SubagentStop hook; a file is covered when it is on disk at the turn's post snapshot. The 2 GB and 10 GB retention settings are shown by `oops doctor` and are not enforced.</sub>
+<sub>✓ yes · ✗ no · — not applicable or not documented. Sources: [Claude Code checkpointing docs](https://code.claude.com/docs/en/checkpointing), [openai/codex PR #19481](https://github.com/openai/codex/pull/19481). The other-tool cells were written 2026-10-14 and were not re-checked for this change. There is still no Gemini CLI checkpointing doc link. oops does not install a SubagentStop hook; a file is covered when it is on disk at the turn's post snapshot. The 2 GB and 10 GB retention settings are shown by `oops doctor` and are not enforced.</sub>
 
 ## FAQ
 

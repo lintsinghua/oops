@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/oops-wordmark-dark.svg">
-    <img alt="oops" src="brand/logo/oops-wordmark.svg" height="64">
+    <source media="(prefers-color-scheme: dark)" srcset="brand/logo/wordmark-dark.svg">
+    <img alt="oops" src="brand/logo/wordmark-light.svg" height="64">
   </picture>
 </p>
 
@@ -30,7 +30,7 @@ go install github.com/lintsinghua/oops/cmd/oops@latest
 oops init                         # 一次接好本机所有 Agent，之后就不用管了
 ```
 
-Homebrew（`oops-cli/tap`）和 npm（`@oops-cli/oops`）都还没注册。
+Homebrew（`oops-cli/tap`）、npm（`@oops-cli/oops`）和 curl 安装脚本都还没有。
 
 ---
 
@@ -54,10 +54,11 @@ oops 工作在更底层的文件系统。不管 Agent 用的是自带的 Edit �
 |---|---|
 | Go | `go install github.com/lintsinghua/oops/cmd/oops@latest` |
 | 二进制 | [GitHub Releases](https://github.com/lintsinghua/oops/releases)：macOS、Linux、Windows · amd64 / arm64 |
-| Homebrew | 即将提供。`oops-cli/tap` 还没注册（`brew install oops-cli/tap/oops`）。 |
-| npm | 即将提供。`@oops-cli/oops` 还没注册（`npm i -g @oops-cli/oops`）。 |
+| Homebrew | 即将提供。`oops-cli/tap` 这个名字还没注册。 |
+| npm | 即将提供。`@oops-cli/oops` 这个包还没注册。 |
+| 安装脚本 | 即将提供。现在没有 curl 安装脚本。 |
 
-GitHub Release 的产物是 tar.gz（Windows 为 zip）和 `checksums.txt`（sha256）。当前 GoReleaser 配置不会做 cosign 签名，也不附带 SBOM 或 SLSA provenance。还没有 `curl \| sh` 安装脚本、Scoop 清单或 winget 清单。
+GitHub Release 的产物是 tar.gz（Windows 为 zip）和 `checksums.txt`（sha256）。当前 GoReleaser 配置不会做 cosign 签名，也不附带 SBOM 或 SLSA provenance。Scoop 和 winget 清单都还没有发布。
 
 ## 30 秒上手
 
