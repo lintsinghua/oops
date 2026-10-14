@@ -55,7 +55,7 @@ Agent 自带的保护网在这些场景下并不够用：
 
 oops 工作在更底层的文件系统。不管 Agent 用的是自带的 Edit 工具、`sed`、Python heredoc 还是 `rm -rf`，也不管文件有没有进 git，这一轮都能撤回。
 
-## 安装
+## 一键安装
 
 不论哪种方式，装完都运行 `oops init`。
 
@@ -368,3 +368,7 @@ CI 在 Linux、macOS、Windows 上跑同一条 `go test -race ./...`，其中包
 ## 许可证
 
 [MIT](LICENSE)
+
+## 致谢
+
+感谢 [Linux.Do](https://linux.do)
