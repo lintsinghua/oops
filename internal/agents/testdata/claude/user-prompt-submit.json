@@ -1,0 +1,8 @@
+{
+  "session_id": "sess-claude-1",
+  "transcript_path": "/tmp/claude-transcript.jsonl",
+  "cwd": "WORKDIR",
+  "permission_mode": "default",
+  "hook_event_name": "UserPromptSubmit",
+  "prompt": "edit the tree"
+}
