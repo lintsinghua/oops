@@ -518,7 +518,9 @@ func TestE2ERunAndSlash(t *testing.T) {
 
 	var idle []string
 	if runtime.GOOS == "windows" {
-		idle = []string{"run", "--idle", "200ms", "--", "powershell", "-NoProfile", "-Command", "Start-Sleep -Milliseconds 300; Set-Content -Path a.txt -Value x; Start-Sleep -Seconds 1; Add-Content -Path a.txt -Value y"}
+		// The watcher has to be up before the first write, and the quiet gap
+		// has to outlast -race scheduling on NTFS. A 1s gap was missed once.
+		idle = []string{"run", "--idle", "200ms", "--", "powershell", "-NoProfile", "-Command", "Start-Sleep -Seconds 2; Set-Content -Path a.txt -Value x; Start-Sleep -Seconds 3; Add-Content -Path a.txt -Value y"}
 	} else {
 		idle = []string{"run", "--idle", "200ms", "--", "sh", "-c", "sleep 0.3; echo x > a.txt; sleep 1; echo y >> a.txt"}
 	}
