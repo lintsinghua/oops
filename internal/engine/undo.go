@@ -691,8 +691,8 @@ func (e *Engine) recordJournalOp(j restore.Journal) error {
 }
 
 // snapWindow is the time the post snapshot was being written.
-// A file modified in this window may already be inside the post snapshot,
-// so its bytes cannot show that the user touched it.
+// Own writes are matched against the earliest start, so an undo or redo
+// after Stop replaces the post snapshot as the baseline.
 type snapWindow struct {
 	Start time.Time
 	Done  time.Time
@@ -709,10 +709,12 @@ func snapWindows(turns []meta.Turn) []snapWindow {
 	return out
 }
 
-// preserveAfterStop keeps a user edit. A file whose mtime falls inside the
-// post-snapshot window is a user edit. Every other file is a user edit only
-// when its content differs from the baseline: the post snapshot, or the
-// bytes the latest undo or redo wrote. --force skips this pass.
+// preserveAfterStop keeps a user edit. An undo or redo baseline wins:
+// matching those bytes is not a user edit. Otherwise a file is a user edit
+// only when its content differs from the post snapshot. An mtime, size, or
+// ctime inside the snapshot window is not enough. On NTFS those fields can
+// still be settling, or can disagree in precision with the snapshot, while
+// the bytes match. --force skips this pass.
 func preserveAfterStop(items []restore.Item, windows []snapWindow, expected, cur map[string]snapshot.Meta, own map[string]ownWrite) {
 	for i := range items {
 		it := &items[i]
@@ -734,15 +736,13 @@ func preserveAfterStop(items []restore.Item, windows []snapWindow, expected, cur
 	}
 }
 
-// userEdited applies the baseline rule. An undo or redo baseline wins: matching
-// those bytes is not a user edit. Otherwise an mtime inside the snapshot
-// window is a user edit, and any other content difference is a user edit.
+// userEdited reports whether path's current bytes differ from the baseline.
+// An undo or redo that ran after Stop is the baseline. Otherwise the baseline
+// is the post snapshot. Metadata that disagrees with the snapshot is not a
+// user edit when the content hash matches.
 func userEdited(path string, now *snapshot.Meta, windows []snapWindow, expected map[string]snapshot.Meta, own map[string]ownWrite) bool {
 	if rec, ok := freshWrite(own, path, earliestStart(windows)); ok {
 		return !baselineMatch(now, rec)
-	}
-	if mtimeInWindows(now, windows) {
-		return true
 	}
 	return !snapshot.SameState(now, lookupMeta(expected, path))
 }
@@ -755,22 +755,6 @@ func baselineMatch(now *snapshot.Meta, rec ownWrite) bool {
 		return false
 	}
 	return rec.Hash != "" && now.Kind == snapshot.KindFile && now.ID.String() == rec.Hash
-}
-
-func mtimeInWindows(now *snapshot.Meta, windows []snapWindow) bool {
-	if now == nil || now.Mtime == 0 {
-		return false
-	}
-	mt := time.Unix(0, now.Mtime)
-	for _, w := range windows {
-		if w.Start.IsZero() || w.Done.IsZero() {
-			continue
-		}
-		if !mt.Before(w.Start) && !mt.After(w.Done) {
-			return true
-		}
-	}
-	return false
 }
 
 func lookupMeta(m map[string]snapshot.Meta, path string) *snapshot.Meta {

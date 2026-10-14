@@ -26,22 +26,10 @@ func TestUndoKeepsFilesNewerThanStop(t *testing.T) {
 	if _, err := e.CloseTurn(ctx, TurnInput{Workspace: ws, SessionID: "s"}, false); err != nil {
 		t.Fatal(err)
 	}
-	turn, err := e.DB.GetTurn(ws.ID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stop := time.Now().Add(-2 * time.Hour)
-	turn.EndedAt = stop
-	if err := e.DB.UpdateTurn(turn); err != nil {
-		t.Fatal(err)
-	}
-	old := stop.Add(-time.Minute)
-	if err := os.Chtimes(agent, old, old); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(nested, old, old); err != nil {
-		t.Fatal(err)
-	}
+	// Bytes the post snapshot already stored are undone even when their mtime
+	// falls inside the snapshot window. A later edit with different bytes stays.
+	mustWrite(t, user, "edited")
+	mustWrite(t, note, "edited-note")
 	res, err := e.Undo(ctx, UndoRequest{Workspace: ws})
 	if err != nil {
 		t.Fatal(err)
@@ -52,13 +40,13 @@ func TestUndoKeepsFilesNewerThanStop(t *testing.T) {
 	if got := mustRead(t, agent); got != "v1" {
 		t.Fatalf("agent.txt %q", got)
 	}
-	if got := mustRead(t, user); got != "created" {
+	if got := mustRead(t, user); got != "edited" {
 		t.Fatalf("user.txt %q", got)
 	}
 	if _, err := os.Stat(nested); !os.IsNotExist(err) {
 		t.Fatalf("old nested file still present: %v", err)
 	}
-	if got := mustRead(t, note); got != "user" {
+	if got := mustRead(t, note); got != "edited-note" {
 		t.Fatalf("note.txt %q", got)
 	}
 	if _, err := os.Stat(filepath.Join(ws.Path, "sub")); err != nil {
@@ -147,7 +135,7 @@ func TestUndoRedoUndoSameTurn(t *testing.T) {
 	}
 }
 
-func TestFileTouchedDuringPostSnapshotIsKept(t *testing.T) {
+func TestMatchingBytesInsideSnapshotWindowAreRestored(t *testing.T) {
 	e, ws := openTest(t)
 	ctx := context.Background()
 	path := filepath.Join(ws.Path, "README.md")
@@ -166,8 +154,8 @@ func TestFileTouchedDuringPostSnapshotIsKept(t *testing.T) {
 	if turn.EndedAt.IsZero() || turn.Stats.SnapDone.IsZero() {
 		t.Fatalf("window start %s done %s", turn.EndedAt, turn.Stats.SnapDone)
 	}
-	// The bytes match the post snapshot. Only the mtime, inside the scan
-	// window, says the user wrote them while the snapshot was running.
+	// The bytes match the post snapshot. Moving mtime into the scan window
+	// used to look like a user edit. Content that still matches is restored.
 	mid := turn.EndedAt
 	if turn.Stats.SnapDone.After(turn.EndedAt) {
 		mid = turn.EndedAt.Add(turn.Stats.SnapDone.Sub(turn.EndedAt) / 2)
@@ -179,20 +167,20 @@ func TestFileTouchedDuringPostSnapshotIsKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Result != "partial" {
+	if res.Result != "ok" {
 		t.Fatalf("result %s %#v", res.Result, res.Effects)
 	}
-	if got := mustRead(t, path); got != "captured" {
+	if got := mustRead(t, path); got != "base" {
 		t.Fatalf("README.md %q", got)
 	}
-	if len(turnKept(res)) != 1 || turnKept(res)[0] != "README.md" {
+	if len(turnKept(res)) != 0 {
 		t.Fatalf("kept %#v", res.Effects)
 	}
 	stored, err := e.DB.GetTurn(ws.ID, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Status != "kept" || len(stored.Stats.Kept) != 1 || stored.Stats.Kept[0] != "README.md" {
+	if stored.Status != "undone" || len(stored.Stats.Kept) != 0 {
 		t.Fatalf("status %s kept %#v", stored.Status, stored.Stats.Kept)
 	}
 }
