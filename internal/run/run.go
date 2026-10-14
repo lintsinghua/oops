@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -50,11 +51,15 @@ func Run(e *engine.Engine, ws engine.Workspace, opt Options) int {
 	cmd.Stdout = opt.Stdout
 	cmd.Stderr = opt.Stderr
 	cmd.Dir = ws.Path
+	// Arm idle detection before the child runs. Otherwise a slow start under
+	// the race detector can miss the whole quiet gap.
+	stopWatch, doneWatch := watch(e, ws, session, opt.Name, opt.Idle)
 	if err := cmd.Start(); err != nil {
+		close(stopWatch)
+		<-doneWatch
 		fmt.Fprintf(opt.Stderr, "x could not start %s\n", opt.Argv[0])
 		return 1
 	}
-	stopWatch := watch(e, ws, session, opt.Name, opt.Idle)
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt)
 	done := make(chan error, 1)
@@ -68,6 +73,7 @@ func Run(e *engine.Engine, ws engine.Workspace, opt Options) int {
 	}
 	signal.Stop(sig)
 	close(stopWatch)
+	<-doneWatch
 	turns := 1
 	if _, err := e.CloseTurn(ctx, engine.TurnInput{Workspace: ws, SessionID: session}, false); err != nil {
 		e.Logf("run close: %v", err)
@@ -82,91 +88,125 @@ func Run(e *engine.Engine, ws engine.Workspace, opt Options) int {
 	return 1
 }
 
-func watch(e *engine.Engine, ws engine.Workspace, session, name string, idle time.Duration) chan struct{} {
+// watch samples the workspace mtime until stop is closed. It returns after the
+// sampler is looping, so the child cannot finish its quiet gap first.
+// done is closed when the sampler has exited.
+func watch(e *engine.Engine, ws engine.Workspace, session, name string, idle time.Duration) (chan struct{}, <-chan struct{}) {
 	stop := make(chan struct{})
+	done := make(chan struct{})
+	armed := make(chan struct{})
 	go func() {
-		w, err := fsnotify.NewWatcher()
-		if err != nil {
-			poll(e, ws, session, name, idle, stop)
-			return
-		}
-		defer w.Close()
-		n := 0
-		_ = filepath.WalkDir(ws.Path, func(path string, d os.DirEntry, err error) error {
-			if err != nil || !d.IsDir() {
-				return nil
-			}
-			base := filepath.Base(path)
-			if base == ".git" || base == "node_modules" {
-				return filepath.SkipDir
-			}
-			if n > 5000 {
-				return filepath.SkipDir
-			}
-			if err := w.Add(path); err == nil {
-				n++
-			}
-			return nil
-		})
-		timer := time.NewTimer(time.Hour)
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		active := false
-		for {
-			select {
-			case <-stop:
-				return
-			case <-w.Events:
-				active = true
-				if !timer.Stop() {
-					select {
-					case <-timer.C:
-					default:
-					}
-				}
-				timer.Reset(idle)
-			case <-w.Errors:
-			case <-timer.C:
-				if !active {
-					continue
-				}
-				active = false
-				ctx := context.Background()
-				_, _ = e.CloseTurn(ctx, engine.TurnInput{Workspace: ws, SessionID: session}, false)
-				_, _ = e.StartTurn(ctx, engine.TurnInput{Workspace: ws, Agent: name, SessionID: session, Kind: "auto", Prompt: "auto"})
-			}
-		}
+		defer close(done)
+		runWatch(e, ws, session, name, idle, stop, armed)
 	}()
-	return stop
+	select {
+	case <-armed:
+	case <-time.After(5 * time.Second):
+	}
+	return stop, done
 }
 
-func poll(e *engine.Engine, ws engine.Workspace, session, name string, idle time.Duration, stop chan struct{}) {
-	tick := time.NewTicker(2 * time.Second)
+// sampleEvery is how often the idle sampler looks at mtimes. It stays well
+// under the idle threshold so a real quiet gap cannot fall between two looks
+// when the race detector delays the goroutine.
+func sampleEvery(idle time.Duration) time.Duration {
+	d := idle / 4
+	if d < 25*time.Millisecond {
+		d = 25 * time.Millisecond
+	}
+	if d > 200*time.Millisecond {
+		d = 200 * time.Millisecond
+	}
+	return d
+}
+
+func runWatch(e *engine.Engine, ws engine.Workspace, session, name string, idle time.Duration, stop <-chan struct{}, armed chan struct{}) {
+	var armOnce sync.Once
+	arm := func() { armOnce.Do(func() { close(armed) }) }
+	defer arm()
+
+	baseline := newestMtime(ws.Path)
+	kick := make(chan struct{}, 1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		watchFS(ws.Path, stop, kick)
+	}()
+	defer wg.Wait()
+
+	// Idle is "the newest mtime is at least this old", not "this goroutine
+	// saw fsnotify events spaced that far apart". On a raced Windows runner
+	// the watch is often still arming, or it drains both writes in one burst,
+	// so an event timer never elapses inside the gap. A 2s poll missed the
+	// same gap because it is longer than the silence.
+	interval := sampleEvery(idle)
+	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	var lastActive time.Time
 	seen := false
 	quiet := false
+	sample := func() {
+		newest := newestMtime(ws.Path)
+		if newest.After(baseline) && newest.After(lastActive) {
+			lastActive = newest
+			seen = true
+			quiet = false
+		}
+		if !seen || quiet || lastActive.IsZero() || time.Since(lastActive) < idle {
+			return
+		}
+		quiet = true
+		ctx := context.Background()
+		_, _ = e.CloseTurn(ctx, engine.TurnInput{Workspace: ws, SessionID: session}, false)
+		_, _ = e.StartTurn(ctx, engine.TurnInput{Workspace: ws, Agent: name, SessionID: session, Kind: "auto", Prompt: "auto"})
+	}
+	arm()
 	for {
 		select {
 		case <-stop:
 			return
-		case t := <-tick.C:
-			newest := newestMtime(ws.Path)
-			if newest.After(lastActive) {
-				lastActive = newest
-				seen = true
-				quiet = false
+		case <-kick:
+			sample()
+		case <-tick.C:
+			sample()
+		}
+	}
+}
+
+func watchFS(root string, stop <-chan struct{}, kick chan<- struct{}) {
+	w, err := fsnotify.NewWatcher()
+	if err != nil {
+		return
+	}
+	defer w.Close()
+	n := 0
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() {
+			return nil
+		}
+		base := filepath.Base(path)
+		if base == ".git" || base == "node_modules" {
+			return filepath.SkipDir
+		}
+		if n > 5000 {
+			return filepath.SkipDir
+		}
+		if err := w.Add(path); err == nil {
+			n++
+		}
+		return nil
+	})
+	for {
+		select {
+		case <-stop:
+			return
+		case <-w.Events:
+			select {
+			case kick <- struct{}{}:
+			default:
 			}
-			if seen && !quiet && !lastActive.IsZero() && t.Sub(lastActive) >= idle {
-				quiet = true
-				ctx := context.Background()
-				_, _ = e.CloseTurn(ctx, engine.TurnInput{Workspace: ws, SessionID: session}, false)
-				_, _ = e.StartTurn(ctx, engine.TurnInput{Workspace: ws, Agent: name, SessionID: session, Kind: "auto"})
-			}
+		case <-w.Errors:
 		}
 	}
 }
