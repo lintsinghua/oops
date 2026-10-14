@@ -89,6 +89,9 @@ func cmdUndo(opt *options, seq int, files []string, dry, force, yes, running boo
 }
 
 func confirmUndo(opt *options, s *session, seq int, files []string, force, yes, running bool) error {
+	if err := s.e.WaitSnapshot(context.Background(), s.ws); err != nil {
+		return err
+	}
 	if seq == 0 && len(files) == 0 && !running {
 		open, err := s.e.DB.RunningTurns(s.ws.ID)
 		if err != nil {

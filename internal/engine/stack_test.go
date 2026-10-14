@@ -81,6 +81,9 @@ func TestWaitPendingBounded(t *testing.T) {
 	if pendingWait != 30*time.Second {
 		t.Fatalf("pending wait bound = %s", pendingWait)
 	}
+	if snapshotWait != 5*time.Second {
+		t.Fatalf("undo snapshot wait bound = %s", snapshotWait)
+	}
 	e, ws := openTest(t)
 	start := time.Now()
 	if err := e.WaitPending(context.Background(), ws); err != nil {
