@@ -134,6 +134,8 @@ func (e *Engine) finish(ctx context.Context, ws Workspace, t meta.Turn, late boo
 		return t, err
 	}
 	cur, gerr := e.DB.GetTurn(ws.ID, t.Seq)
+	// Stop marks the turn pending before this snapshot exists. A later finish
+	// stores the post once. A turn that already has one is left as stored.
 	if gerr == nil && cur.Status != "running" && cur.PostSnap != "" {
 		return cur, nil
 	}

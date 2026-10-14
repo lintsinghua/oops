@@ -184,6 +184,9 @@ func (db *DB) GetSnapshot(id string) (Snapshot, error) {
 	return s, nil
 }
 
+// StatusPending means Stop has ended the turn and the post snapshot is not stored yet.
+const StatusPending = "pending"
+
 // Turn is one agent or manual turn.
 type Turn struct {
 	ID          int64
@@ -258,6 +261,14 @@ func (db *DB) SetStatus(id int64, status string) error {
 	return err
 }
 
+// MarkTurnPending records that Stop has ended the turn. The post snapshot
+// is still outstanding. The write does not walk the tree.
+func (db *DB) MarkTurnPending(id int64, ended time.Time) error {
+	_, err := db.sql.Exec(`UPDATE turns SET status=?, ended_at=? WHERE id=? AND status='running'`,
+		StatusPending, fmtTime(ended), id)
+	return err
+}
+
 // LatestSnapshot returns the newest snapshot row for a workspace.
 func (db *DB) LatestSnapshot(ws string) (Snapshot, error) {
 	var s Snapshot
@@ -328,6 +339,25 @@ func (db *DB) ListTurns(ws string, limit int, all bool) ([]Turn, error) {
 func (db *DB) RunningTurns(ws string) ([]Turn, error) {
 	rows, err := db.sql.Query(`SELECT id, ws, seq, agent, session_id, agent_turn_id, kind, prompt_summary, started_at, ended_at, status, pre_snap, post_snap, stats
 		FROM turns WHERE ws=? AND status='running' ORDER BY seq`, ws)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Turn
+	for rows.Next() {
+		t, err := scanTurn(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// PendingTurns returns turns Stop has ended whose post snapshot is not stored.
+func (db *DB) PendingTurns(ws string) ([]Turn, error) {
+	rows, err := db.sql.Query(`SELECT id, ws, seq, agent, session_id, agent_turn_id, kind, prompt_summary, started_at, ended_at, status, pre_snap, post_snap, stats
+		FROM turns WHERE ws=? AND status=? ORDER BY seq`, ws, StatusPending)
 	if err != nil {
 		return nil, err
 	}

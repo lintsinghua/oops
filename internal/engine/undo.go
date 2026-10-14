@@ -43,7 +43,7 @@ type UndoResult struct {
 // Undo reverses one finished turn. With no turn number, a redo is undone
 // first (the stack), and a still-running turn is refused unless Running is set.
 func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) {
-	if err := e.WaitPending(ctx, req.Workspace); err != nil {
+	if err := e.WaitSnapshot(ctx, req.Workspace); err != nil {
 		return UndoResult{}, err
 	}
 	if req.Seq == 0 && len(req.Files) == 0 && !req.Running {
@@ -137,6 +137,12 @@ func (e *Engine) turnForUndo(ctx context.Context, req UndoRequest) (meta.Turn, e
 	}
 	if err != nil {
 		return t, err
+	}
+	if t.Status == meta.StatusPending {
+		t, err = e.completePendingTurn(ctx, req.Workspace, t)
+		if err != nil {
+			return t, err
+		}
 	}
 	if t.Status == "running" {
 		if !req.Running {

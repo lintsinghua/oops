@@ -24,10 +24,15 @@ func (e *Engine) pendingDir(id string) string {
 }
 
 // QueueFinish records that the running turn still needs its post snapshot.
+// Before it returns it marks the turn ended in the database, so a command
+// that starts after the hook returns does not see a still-running turn.
 // The caller can return immediately and let finish-pending take the snapshot.
 func (e *Engine) QueueFinish(ws Workspace, session string, late bool) error {
 	t, err := e.runningTurn(ws, session)
 	if err != nil {
+		return err
+	}
+	if err := e.DB.MarkTurnPending(t.ID, e.Now); err != nil {
 		return err
 	}
 	dir := e.pendingDir(ws.ID)
@@ -69,10 +74,17 @@ func (e *Engine) SealRunning(ctx context.Context, ws Workspace) error {
 	}
 	defer e.unlockPending(ws)
 	running, err := e.DB.RunningTurns(ws.ID)
-	if err != nil || len(running) == 0 {
+	if err != nil {
 		return err
 	}
-	for _, t := range running {
+	pending, err := e.DB.PendingTurns(ws.ID)
+	if err != nil {
+		return err
+	}
+	if len(running) == 0 && len(pending) == 0 {
+		return nil
+	}
+	for _, t := range append(running, pending...) {
 		if _, err := e.finish(ctx, ws, t, true); err != nil {
 			return err
 		}
@@ -85,25 +97,48 @@ func (e *Engine) SealRunning(ctx context.Context, ws Workspace) error {
 // before it finishes that snapshot itself.
 const pendingWait = 30 * time.Second
 
+// snapshotWait is how long undo waits for a post snapshot Stop already queued.
+const snapshotWait = 5 * time.Second
+
 // WaitPending blocks until a background post-snapshot for ws has finished.
 // If the background process is gone, this process finishes the job itself.
 // The wait is bounded by pendingWait. When nothing is queued it returns
 // without sleeping.
 func (e *Engine) WaitPending(ctx context.Context, ws Workspace) error {
-	deadline := time.Now().Add(pendingWait)
+	return e.waitPending(ctx, ws, pendingWait)
+}
+
+// WaitSnapshot waits for a post snapshot that Stop has already queued.
+// A turn that is still running, with no queued snapshot, returns immediately.
+// The wait is bounded by snapshotWait. At the bound this process stores the
+// snapshot itself when the background child is gone.
+func (e *Engine) WaitSnapshot(ctx context.Context, ws Workspace) error {
+	return e.waitPending(ctx, ws, snapshotWait)
+}
+
+func (e *Engine) waitPending(ctx context.Context, ws Workspace, limit time.Duration) error {
+	deadline := time.Now().Add(limit)
 	for {
-		if !e.hasPending(ws) {
+		outstanding, err := e.snapshotOutstanding(ws)
+		if err != nil {
+			return err
+		}
+		if !outstanding {
 			return nil
 		}
 		if !e.pendingOwnerAlive(ws) || time.Now().After(deadline) {
 			if err := e.FinishPending(ctx, ws); err != nil {
 				return err
 			}
-			if !e.hasPending(ws) {
+			outstanding, err = e.snapshotOutstanding(ws)
+			if err != nil {
+				return err
+			}
+			if !outstanding {
 				return nil
 			}
 		}
-		if time.Now().After(deadline) && e.hasPending(ws) {
+		if time.Now().After(deadline) {
 			return e.FinishPending(ctx, ws)
 		}
 		select {
@@ -112,6 +147,19 @@ func (e *Engine) WaitPending(ctx context.Context, ws Workspace) error {
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+}
+
+// snapshotOutstanding reports a queued post snapshot or a turn Stop has
+// ended whose post snapshot is not stored yet.
+func (e *Engine) snapshotOutstanding(ws Workspace) (bool, error) {
+	if e.hasPending(ws) {
+		return true, nil
+	}
+	pending, err := e.DB.PendingTurns(ws.ID)
+	if err != nil {
+		return false, err
+	}
+	return len(pending) > 0, nil
 }
 
 func (e *Engine) hasPending(ws Workspace) bool {
@@ -136,10 +184,7 @@ func (e *Engine) FinishPending(ctx context.Context, ws Workspace) error {
 	defer e.unlockPending(ws)
 	dir := e.pendingDir(ws.ID)
 	entries, err := os.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	for _, ent := range entries {
@@ -157,7 +202,7 @@ func (e *Engine) FinishPending(ctx context.Context, ws Workspace) error {
 			continue
 		}
 		t, err := e.DB.GetTurn(ws.ID, job.Seq)
-		if err != nil || t.Status != "running" {
+		if err != nil || (t.Status != "running" && t.Status != meta.StatusPending) {
 			_ = os.Remove(path)
 			continue
 		}
@@ -166,7 +211,32 @@ func (e *Engine) FinishPending(ctx context.Context, ws Workspace) error {
 		}
 		_ = os.Remove(path)
 	}
+	pending, err := e.DB.PendingTurns(ws.ID)
+	if err != nil {
+		return err
+	}
+	for _, t := range pending {
+		if t.PostSnap != "" {
+			continue
+		}
+		if _, err := e.finish(ctx, ws, t, false); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+// completePendingTurn stores the post snapshot for a turn Stop already ended.
+func (e *Engine) completePendingTurn(ctx context.Context, ws Workspace, t meta.Turn) (meta.Turn, error) {
+	if t.Status != meta.StatusPending {
+		return t, nil
+	}
+	done, err := e.finish(ctx, ws, t, false)
+	if err != nil {
+		return t, err
+	}
+	_ = os.Remove(filepath.Join(e.pendingDir(ws.ID), strconv.Itoa(t.Seq)+".json"))
+	return done, nil
 }
 
 // FinishAllPending closes queued post-snapshots in every workspace.
