@@ -368,3 +368,7 @@ CI 在 Linux、macOS、Windows 上跑同一条 `go test -race ./...`，其中包
 ## 许可证
 
 [MIT](LICENSE)
+
+## 致谢
+
+感谢 [Linux.Do](https://linux.do)
