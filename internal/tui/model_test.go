@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -170,8 +171,11 @@ func TestTimelinePromptUsesRemainingWidth(t *testing.T) {
 	if !strings.Contains(view, "1 file") {
 		t.Fatalf("columns clipped:\n%s", view)
 	}
-	if !strings.Contains(view, `"`+prompt+`"`) {
-		t.Fatalf("prompt not in full:\n%s", view)
+	if !strings.Contains(view, "please refactor the authentication") {
+		t.Fatalf("prompt too short:\n%s", view)
+	}
+	if strings.Contains(view, `"`+prompt+`"`) {
+		t.Fatalf("prompt was not truncated to the remaining column:\n%s", view)
 	}
 	if !strings.Contains(view, "handler.go") {
 		t.Fatalf("path:\n%s", view)
@@ -345,8 +349,11 @@ func TestTimelineLayoutAt120(t *testing.T) {
 		shown = strings.Count(quoted(line), "p")
 		pLine = line
 	}
-	if shown < 80 {
+	if shown < 60 {
 		t.Fatalf("95-char prompt showed %d chars: %s", shown, pLine)
+	}
+	if !strings.Contains(pLine, "1 file") {
+		t.Fatalf("file column:\n%s", pLine)
 	}
 
 	m.Apply = func(a Action) ([]Row, string, error) {
@@ -410,6 +417,173 @@ func TestPreviewPathsTruncateSeparately(t *testing.T) {
 	if paths < 2 {
 		t.Fatalf("paths:\n%s", got)
 	}
+}
+
+func TestTimelineColumnsRightAlign(t *testing.T) {
+	long := strings.Repeat("p", 90)
+	rows := []Row{
+		{Seq: 2, Agent: "claude", When: "1 min ago", Prompt: "short", Files: 1, Status: "done", Preview: "  Undo #2 would:\n"},
+		{Seq: 1, Agent: "codex", When: "2 min ago", Prompt: long, Files: 12, Status: "undone", Preview: "  Undo #1 would:\n"},
+	}
+	m := New(rows, "proj", "", false, true)
+	m.Width = 120
+	m.Height = 24
+	view := m.View()
+	var one, many string
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, `"short"`) {
+			one = line
+		}
+		if strings.Contains(line, "undone") && strings.Contains(line, "12 files") {
+			many = line
+		}
+	}
+	if one == "" || many == "" {
+		t.Fatalf("rows:\n%s", view)
+	}
+	if displayEnd(one, "1 file") != displayEnd(many, "12 files") {
+		t.Fatalf("file columns\n%s\n%s", one, many)
+	}
+	if ui.DisplayWidth(one) != 120 || ui.DisplayWidth(many) != 120 {
+		t.Fatalf("row widths %d %d\n%s\n%s", ui.DisplayWidth(one), ui.DisplayWidth(many), one, many)
+	}
+	if !strings.Contains(many, "…") {
+		t.Fatalf("long prompt was not truncated:\n%s", many)
+	}
+	if displayEnd(many, "undone") <= displayEnd(many, "12 files") {
+		t.Fatalf("undone column:\n%s", many)
+	}
+}
+
+func TestTimelinePreviewFitsHeight(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("  Undo #2 would:\n\n    remove   8 files\n")
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&b, "      src/file%d.ts\n", i)
+	}
+	b.WriteString("\n  ran: tidy the api module\n")
+	rows := make([]Row, 0, 8)
+	rows = append(rows, Row{
+		Seq: 9, Agent: "claude", When: "1 min ago", Prompt: "edit api", Files: 8, Status: "done", Preview: b.String(),
+	})
+	for i := 0; i < 7; i++ {
+		rows = append(rows, Row{
+			Seq: i + 1, Agent: "codex", When: "2 min ago", Prompt: "edit", Files: 1, Status: "done",
+			Preview: "  Undo #1 would:\n\n    revert  1 file\n      a.txt\n",
+		})
+	}
+	for _, sz := range []struct{ w, h int }{{120, 22}, {80, 24}} {
+		m := New(rows, "proj", "", false, true)
+		m.Width = sz.w
+		m.Height = sz.h
+		view := m.View()
+		lines := strings.Split(view, "\n")
+		if len(lines) > sz.h {
+			t.Fatalf("%dx%d has %d lines\n%s", sz.w, sz.h, len(lines), view)
+		}
+		if !strings.Contains(lines[0], "oops") {
+			t.Fatalf("%dx%d title %q\n%s", sz.w, sz.h, lines[0], view)
+		}
+		if !strings.Contains(lines[len(lines)-1], "select") {
+			t.Fatalf("%dx%d footer %q", sz.w, sz.h, lines[len(lines)-1])
+		}
+		if strings.TrimSpace(lines[2]) != "" && !strings.Contains(lines[2], "Undid") {
+			t.Fatalf("%dx%d toast row %q", sz.w, sz.h, lines[2])
+		}
+		shown := 0
+		for i := 0; i < 8; i++ {
+			if strings.Contains(view, fmt.Sprintf("src/file%d.ts", i)) {
+				shown++
+			}
+		}
+		if shown >= 8 || shown < 1 || !strings.Contains(view, "more") {
+			t.Fatalf("%dx%d showed %d paths\n%s", sz.w, sz.h, shown, view)
+		}
+		ruleBeforePreview := false
+		for i, line := range lines {
+			if strings.Contains(line, "Undo #") && i > 0 && strings.Contains(lines[i-1], "─") {
+				ruleBeforePreview = true
+			}
+		}
+		if !ruleBeforePreview {
+			t.Fatalf("%dx%d missing the rule between list and preview\n%s", sz.w, sz.h, view)
+		}
+	}
+}
+
+func TestClipPreviewTightRow(t *testing.T) {
+	lines := []string{
+		"  Undo #2 would:",
+		"",
+		"  remove   4 files",
+		"    src/api.ts",
+		"    src/db.ts",
+		"    src/ui.ts",
+		"    src/app.ts",
+	}
+	got := strings.Join(clipPreview(lines, 4), "\n")
+	if !strings.Contains(got, "src/api.ts … +3 more") {
+		t.Fatalf("tight row:\n%s", got)
+	}
+	if strings.Contains(got, "src/db.ts") {
+		t.Fatalf("extra path:\n%s", got)
+	}
+}
+
+func TestTimelineDividerFullHeight(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("  Undo #3 would:\n\n    remove   4 files\n")
+	for _, path := range []string{"src/api.ts", "src/db.ts", "src/ui.ts", "src/app.ts"} {
+		b.WriteString("      " + path + "\n")
+	}
+	b.WriteString("\n  ran: wire the preview\n")
+	rows := []Row{{
+		Seq: 3, Agent: "claude", When: "1 min ago", Prompt: "short", Files: 4, Status: "done", Preview: b.String(),
+	}}
+	m := New(rows, "proj", "", false, true)
+	m.Width = 170
+	m.Height = 30
+	view := m.View()
+	col := -1
+	bars := 0
+	var indents []int
+	for _, line := range strings.Split(view, "\n") {
+		i := strings.Index(line, "│")
+		if i < 0 {
+			continue
+		}
+		if col < 0 {
+			col = i
+		}
+		if i != col {
+			t.Fatalf("divider column %d want %d\n%s", i, col, line)
+		}
+		bars++
+		right := line[i+len("│"):]
+		trim := strings.TrimSpace(right)
+		if strings.Contains(trim, "src/") {
+			indents = append(indents, len(right)-len(strings.TrimLeft(right, " ")))
+		}
+	}
+	if bars < 4 {
+		t.Fatalf("divider rows %d\n%s", bars, view)
+	}
+	if len(indents) < 2 {
+		t.Fatalf("paths:\n%s", view)
+	}
+	for _, n := range indents[1:] {
+		if n != indents[0] {
+			t.Fatalf("path indents %v\n%s", indents, view)
+		}
+	}
+}
+
+func displayEnd(line, needle string) int {
+	i := strings.Index(line, needle)
+	if i < 0 {
+		return -1
+	}
+	return ui.DisplayWidth(line[:i]) + ui.DisplayWidth(needle)
 }
 
 func quoted(line string) string {

@@ -187,23 +187,25 @@ oops 不取代 Agent 自带的检查点，而是补上它们覆盖不到的地�
 
 oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因之一就是快照给用户带来了问题，所以这是 oops 的第一条规矩：快照是增量的（只重读 size、mtime 或 mode 变化的文件），被排除的目录直接剪掉不遍历，每次快照有硬超时（默认 10 秒）——超时后快照标记为 partial，hook 返回。轮次结束的 hook 要等 post 快照落盘才返回。轮次开始的 hook 要等 pre 快照落盘才返回。
 
-2026-10-14 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。p50 是 21 个样本里排序后的第 11 个，p95 是第 20 个（nearest-rank）。机器：4 vCPU，Linux 6.12.94+ x86_64。
+2026-10-14 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。p50 是 21 个样本里排序后的第 11 个，p95 是第 20 个（nearest-rank）。机器：4 vCPU（KVM 上的 Intel Xeon，每核 1 线程），16 GB 内存，256 GB virtio 磁盘（`/dev/vdc` 上的 ext4；客户机把这块盘报告成机械盘），Linux 6.12.94+ x86_64。
+
+这一轮 harness 测到 turn-end 在 1 万文件是 112 ms / 127 ms、10 万文件是 1.00 s / 1.11 s，turn-start 是 99 ms / 153 ms 和 0.89 s / 0.99 s。同一种目录上的设计测量更高：Stop 在 1 万文件约 180 ms，Stop 在 10 万文件约 1.4 s，Start 在 10 万文件约 1.2 s。下面每个格子取两者里更高的数。设计测量高于这一轮 p95 时，公布的 p50 和 p95 都用这个数。1 万文件的 Start 没有设计测量，所以那一行是这一轮的结果。
 
 **Agent 等待轮次结束 hook 返回的时间。** post 快照在这个进程里完成。`TestHookVisibleLatency` 编译 `./cmd/oops`，先走一轮冷启动，等已排队的快照落盘，再计时 21 次 `oops hook claude turn-end` 从进程启动到退出。进程在快照落盘之后才退出。
 
 | 文件数 | Agent 等待 turn-end hook 返回，p50 | Agent 等待 turn-end hook 返回，p95 |
 |---:|---:|---:|
-| 10,000 | 103 ms | 107 ms |
-| 100,000 | 0.93 s | 1.00 s |
+| 10,000 | 180 ms | 180 ms |
+| 100,000 | 1.4 s | 1.4 s |
 
 **Agent 等待轮次开始 hook 返回的时间。** pre 快照在这个进程里完成，hook 要等快照落盘才返回。方法和上面的 turn-end 表相同，计时的是上一张 post 快照已经结束后的 `oops hook claude turn-start`，所以这段等待是 pre 快照加上进程启动。
 
 | 文件数 | Agent 等待 turn-start hook 返回，p50 | Agent 等待 turn-start hook 返回，p95 |
 |---:|---:|---:|
-| 10,000 | 92 ms | 149 ms |
-| 100,000 | 0.84 s | 0.90 s |
+| 10,000 | 99 ms | 153 ms |
+| 100,000 | 1.2 s | 1.2 s |
 
-这一轮测量里，1 万个文件的 post 快照让 turn-end hook 的 p50 停在 103 ms。默认 10 秒超时会把快照标成 partial，hook 仍然返回。如果上一张 post 快照在扫描中途被杀掉，turn-start hook 会先等剩下的任务，上限 30 秒（`TestWaitPendingBounded`）。任务已经完成时，这段额外等待不到 50 ms。进程死掉不会丢掉这一轮：任务文件会留到后面的命令把 post 快照写完（`TestCrashedChildFinishesTurn`）。2026-10-13 的进程内热 Capture（不含进程启动）是 1 万文件 82 ms / 91 ms、10 万文件 0.82 s / 3.5 s（`TestHotCapturePercentiles`）。上面两张表是更晚一次测量，记的是 Agent 实际等待的时间。
+公布的 1 万文件 post 快照 p50 是 180 ms。默认 10 秒超时会把快照标成 partial，hook 仍然返回。如果上一张 post 快照在扫描中途被杀掉，turn-start hook 会先等剩下的任务，上限 30 秒（`TestWaitPendingBounded`）。任务已经完成时，这段额外等待不到 50 ms。进程死掉不会丢掉这一轮：任务文件会留到后面的命令把 post 快照写完（`TestCrashedChildFinishesTurn`）。2026-10-13 的进程内热 Capture（不含进程启动）是 1 万文件 82 ms / 91 ms、10 万文件 0.82 s / 3.5 s（`TestHotCapturePercentiles`）。上面两张表是更晚一次测量，记的是 Agent 实际等待的时间。
 
 **冷启动和扫描时的内存。** `TestColdStart10k` 计时的是对 10,000 个文件、合计 300,000,000 字节做的第一次进程内 Capture。这台机器上是 0.69 s（PRD 在 Linux 上的上限是 3 s）。`TestScanRSS100k` 在扫描 100,000 个文件时采样 VmRSS，峰值 119.5 MiB，即 125,341,696 字节（PRD 上限是 150 MB）。测于 2026-10-13。这两个数各是一次采样，不是百分位。
 </details>

@@ -58,9 +58,9 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | F20 AC1 | PASS | `TestE2ESubagentStopDoesNotSplit` | |
 | F20 AC2 | PASS | `TestNoticeOncePerReason` | Same reason is stored once |
 | F20 AC3 | PASS | `TestE2EPartialNoticeAndHookExit` | Claude gets one `oops ·` systemMessage. The next command does not repeat it |
-| §6.2 10k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 103 ms / 107 ms. The post snapshot is stored before the hook returns. Measured 2026-10-14, 4 vCPU |
-| §6.2 100k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 0.93 s / 1.00 s for the post snapshot to be stored |
-| §6.2 turn-start | PASS | `TestHookVisibleLatency` | Agent waits for the pre snapshot: 92 ms / 149 ms at 10k, 0.84 s / 0.90 s at 100k. Measured 2026-10-14, 4 vCPU |
+| §6.2 10k turn-end | PASS | `TestHookVisibleLatency` | Published agent wait 180 ms / 180 ms, the higher of this run (112 ms / 127 ms) and the designer measurement (~180 ms). The post snapshot is stored before the hook returns. Measured 2026-10-14: 4 vCPU Intel Xeon on KVM, 16 GB RAM, 256 GB virtio disk, Linux 6.12.94+ |
+| §6.2 100k turn-end | PASS | `TestHookVisibleLatency` | Published wait 1.4 s / 1.4 s. This run was 1.00 s / 1.11 s; the designer measurement was ~1.4 s |
+| §6.2 turn-start | PASS | `TestHookVisibleLatency` | Published pre-snapshot wait: 99 ms / 153 ms at 10k (this run; no designer figure) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s) |
 | §6.2 in-process capture | PASS | `TestHotCapturePercentiles` | Scan without process startup, measured 2026-10-13: 82 ms / 91 ms at 10k, 0.82 s / 3.5 s at 100k. The agent wait is the turn-end row |
 | §6.2 empty turn | PASS | `TestEmptyTurnAddsLittle` | Unchanged checkpoint adds at most 4 KB of objects |
 | §6.2 undo 1k | PASS | `TestUndoThousandFiles` | The Windows 2 s target is measured on Windows amd64. windows-11-arm: Known gap, to be optimized in v0.1.x (non-blocking). Atomic writes stay. Under 1 s on the Linux measurement machine. Hosted windows-11-arm, without `-race`, took 2.06 s (Go 1.26.9) and 3.93 s (Go 1.27.2) on 2026-10-13 |
@@ -81,7 +81,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-4 redo hint suggests undo | PASS | `TestRedoHintSuggestsUndo` | After redo the hint is `oops undo` |
 | DEMO-5 diff skips directories | PASS | `TestTimelineDiffSkipsDirectory` | `d` opens the first file diff and skips an empty directory entry |
 | DEMO-6 timeline stays on the alt screen | PASS | `TestTimelineRefreshInPlace`, `TestTimelineSuccessMark` | Undo and redo refresh the timeline in place. The program uses the alternate screen, so quit leaves the terminal clear. The footer shows `R redo`. A success toast uses ✓, not ! |
-| DEMO-7 timeline columns use the width | PASS | `TestTimelinePromptUsesRemainingWidth`, `TestTimelineLayoutAt120` | The prompt column is the terminal width minus the preview column and the fixed columns. At 120 columns the preview sits under the list, so a prompt that fits is shown in full and a 95-character prompt keeps at least 80 characters. At 170 columns the preview stays beside the list |
+| DEMO-7 timeline columns use the width | PASS | `TestTimelinePromptUsesRemainingWidth`, `TestTimelineLayoutAt120`, `TestTimelineColumnsRightAlign` | The prompt is truncated to the width left after the turn, agent, time, file-count, and status columns. The file count and the `undone` marker are right-aligned in fixed-width columns. At 120 columns the preview sits under the list. A 95-character prompt keeps at least 60 characters. At 170 columns the preview stays beside the list |
 | DEMO-8 /oops reads as success | PASS | `TestSlashSuccessIsShort` | The hook reply is a short `✓ oops` line. Claude still wraps it as a block decision; that wrapper is documented in both READMEs |
 | DEMO-9 subcommand help | PASS | `TestInitHelpShowsFlags` | `oops init -h` shows init's flags. The root help stays the short page |
 | DEMO-10 Gemini version is not a launch | PASS | `TestGeminiVersionDoesNotRun`, `TestGeminiInitLeavesSettings`, `TestNonSemverVersionIsUnknown` | Gemini's version is read from `@google/gemini-cli` `package.json`. The binary is not executed, so a hand-written settings file is unchanged and `init --undo` restores it byte for byte. Output with no semver is shown as `unknown` |
@@ -95,12 +95,15 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-18 init version column | PASS | `TestInitVersionColumnFits` | Column width follows the text, including `2026.10.12-d47ca18` |
 | DEMO-19 init undo removes empty dirs | PASS | `TestInitUndoRemovesEmptyDirs` | Directories oops created are removed when empty. A directory that still holds a user file stays |
 | DEMO-20 init undo clears an empty Claude home | PASS | `TestInitUndoClearsEmptyClaudeHome`, `TestInitUndoRestoresClaudeSettings`, `TestRemoveOopsDropsEmptyMatcher`, `TestUninstallDeletesOopsCreatedClaudeFile`, `TestUninstallRestoresClaudeBytes` | Matcher groups with no hooks, empty event arrays, and empty `hooks` objects are pruned. An oops-created settings file that is left as `{}` is deleted, and an empty `~/.claude` oops created is removed. A file that already existed is restored byte for byte |
+| DEMO-21 preview stays inside the terminal | PASS | `TestTimelinePreviewFitsHeight`, `TestClipPreviewTightRow` | At 120×22 and 80×24 the title is on line 1 and the view has at most that many lines. Header, toast, and footer stay. A long file list is cut to the rows that remain, then `+K more`. One tight row is `src/api.ts … +3 more` |
+| DEMO-22 stacked list and preview are separated | PASS | `TestTimelinePreviewFitsHeight` | At 120×22 and 80×24 the preview sits under the list with a rule between them |
+| DEMO-23 side-by-side divider spans the pane | PASS | `TestTimelineDividerFullHeight` | At 170 columns the `│` divider is on every row of the taller pane, in one column. Path lines in the preview share one indent |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 91 |
+| PASS | 94 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action
@@ -119,4 +122,4 @@ These are not FAIL. G1–G10 are v0.2 in the PRD and are not implemented. The ot
 
 ## Hook wait vs snapshot completion
 
-The turn-end hook returns only after the post snapshot is stored. On 2026-10-14 that wait was 103 ms p50 / 107 ms p95 at 10k files and 0.93 s / 1.00 s at 100k. The turn-start hook returns only after the pre snapshot is stored (92 ms / 149 ms at 10k, 0.84 s / 0.90 s at 100k on the same run). A timeout marks the snapshot partial. A file newer than the turn's Stop time is kept.
+The turn-end hook returns only after the post snapshot is stored. On 2026-10-14 the published wait is 180 ms p50 / 180 ms p95 at 10k files and 1.4 s / 1.4 s at 100k, the higher of `TestHookVisibleLatency` (112 ms / 127 ms and 1.00 s / 1.11 s) and a designer measurement (~180 ms and ~1.4 s). The turn-start hook returns only after the pre snapshot is stored. The published wait is 99 ms / 153 ms at 10k (this run) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s). Machine: 4 vCPU (Intel Xeon on KVM), 16 GB RAM, 256 GB virtio disk (ext4), Linux 6.12.94+. A timeout marks the snapshot partial. A file newer than the turn's Stop time is kept.
