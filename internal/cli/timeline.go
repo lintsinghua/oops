@@ -236,7 +236,7 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 // the same planner those commands apply.
 func previewFromPlan(e *engine.Engine, t meta.Turn, changes []snapshot.Change, effects []engine.Effect, redo bool) (string, []string) {
 	shown := mapPreviewEffects(effects, redo)
-	_, diffs := previewTurn(e, t, changes)
+	diffs := planDiffs(e, t, changes, effects, redo)
 	var b strings.Builder
 	switch {
 	case t.Status == "kept":
@@ -257,6 +257,50 @@ func previewFromPlan(e *engine.Engine, t meta.Turn, changes []snapshot.Change, e
 		b.WriteString("\n  ran: " + t.Prompt + "\n")
 	}
 	return b.String(), diffs
+}
+
+// planDiffs is current disk versus the bytes applying the plan would write.
+// A kept file shows that same comparison and says it will not change.
+func planDiffs(e *engine.Engine, t meta.Turn, changes []snapshot.Change, effects []engine.Effect, redo bool) []string {
+	post := map[string]*snapshot.Meta{}
+	for _, c := range changes {
+		if c.Post != nil {
+			post[c.Path] = c.Post
+		}
+	}
+	var diffs []string
+	for _, ef := range effects {
+		if ef.Dir {
+			continue
+		}
+		nowB := e.ReadBlob(ef.Before)
+		want := ef.Want
+		if redo && (ef.Op == "kept" || ef.Op == "unprotected") {
+			if p := post[ef.Path]; p != nil {
+				want = p
+			}
+		}
+		wantB := e.ReadBlob(want)
+		label := previewVerb(ef.Op, redo)
+		body, err := snapshot.Unified("now/"+ef.Path, "after/"+ef.Path, string(nowB), string(wantB), 3)
+		if err != nil {
+			body = ""
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, " #%d · %s %s\n", t.Seq, label, ef.Path)
+		if ef.Op == "kept" || ef.Op == "unprotected" {
+			b.WriteString("kept — will not change\n")
+		}
+		if body == "" {
+			b.WriteString(label + " " + ef.Path + "\n")
+		} else {
+			b.WriteString(body)
+		}
+		if len(diffs) < 20 {
+			diffs = append(diffs, b.String())
+		}
+	}
+	return diffs
 }
 
 func mapPreviewEffects(effects []engine.Effect, redo bool) []engine.Effect {

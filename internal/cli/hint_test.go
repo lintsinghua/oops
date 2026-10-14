@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/lintsinghua/oops/internal/tui"
 )
 
 func TestPartialHintsTargetKeptFilesOnly(t *testing.T) {
@@ -34,7 +36,9 @@ func TestPartialHintsTargetKeptFilesOnly(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("redo %d\n%s", code, out)
 	}
-	assertFileCommands(t, out, []string{"pkg/m1.go"})
+	if strings.Contains(out, "Undo it too") || strings.Contains(out, "--file") || strings.Contains(out, "oops undo ") {
+		t.Fatalf("redo suggested undo:\n%s", out)
+	}
 
 	home2 := t.TempDir()
 	root2 := t.TempDir()
@@ -57,7 +61,132 @@ func TestPartialHintsTargetKeptFilesOnly(t *testing.T) {
 	if code != 3 {
 		t.Fatalf("redo json %d\n%s", code, out)
 	}
-	assertJSONCommands(t, out, []string{"pkg/m1.go"})
+	assertRedoJSONKeepsFile(t, out, "pkg/m1.go")
+}
+
+func TestRedoDryRunUsesRestoreWording(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	mustWriteFile(t, filepath.Join(root, "a.txt"), "one\n")
+	mustWriteFile(t, filepath.Join(root, "README.md"), "readme\n")
+	agentTurn(t, home, root, "t", "edit", func() {
+		mustWriteFile(t, filepath.Join(root, "a.txt"), "agent\n")
+		mustWriteFile(t, filepath.Join(root, "README.md"), "agent readme\n")
+		mustWriteFile(t, filepath.Join(root, "f1.txt"), "1\n")
+		mustWriteFile(t, filepath.Join(root, "f2.txt"), "2\n")
+		mustWriteFile(t, filepath.Join(root, "f3.txt"), "3\n")
+	})
+	mustWriteFile(t, filepath.Join(root, "a.txt"), "agent\nuser-line\nthird\n")
+	if code, out := runOops(t, home, root, "", "undo", "-y"); code != 3 {
+		t.Fatalf("undo %d\n%s", code, out)
+	}
+	code, out := runOops(t, home, root, "", "redo", "-n")
+	if code != 0 {
+		t.Fatalf("redo -n %d\n%s", code, out)
+	}
+	if strings.Contains(out, "revert") {
+		t.Fatalf("revert wording:\n%s", out)
+	}
+	if !strings.Contains(out, "re-apply") || !strings.Contains(out, "README.md") || !strings.Contains(out, "restore") {
+		t.Fatalf("redo wording:\n%s", out)
+	}
+	if got := mustReadFile(t, filepath.Join(root, "README.md")); got != "readme\n" {
+		t.Fatalf("dry run wrote README %q", got)
+	}
+	code, out = runOops(t, home, root, "", "redo", "-n", "--json")
+	if code != 0 {
+		t.Fatalf("json %d\n%s", code, out)
+	}
+	var doc struct {
+		Restored []string `json:"restored"`
+		Reverted []string `json:"reverted"`
+		Kept     []struct {
+			Path string `json:"path"`
+		} `json:"kept"`
+		Commands []string `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(doc.Reverted) != 0 {
+		t.Fatalf("reverted %#v\n%s", doc.Reverted, out)
+	}
+	if !contains(doc.Restored, "README.md") || contains(doc.Reverted, "README.md") {
+		t.Fatalf("restored %#v reverted %#v", doc.Restored, doc.Reverted)
+	}
+	if len(doc.Commands) != 0 {
+		t.Fatalf("commands %#v", doc.Commands)
+	}
+	kept := false
+	for _, k := range doc.Kept {
+		if k.Path == "a.txt" {
+			kept = true
+		}
+	}
+	if !kept {
+		t.Fatalf("kept %#v", doc.Kept)
+	}
+}
+
+func TestKeptPreviewDiffIsDiskVersusApply(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWriteFile(t, filepath.Join(root, "src", "a.txt"), "one\ntwo\n")
+	mustWriteFile(t, filepath.Join(root, "README.md"), "readme\n")
+	agentTurn(t, home, root, "t", "edit", func() {
+		mustWriteFile(t, filepath.Join(root, "src", "a.txt"), "agent\n")
+		mustWriteFile(t, filepath.Join(root, "README.md"), "agent readme\n")
+		mustWriteFile(t, filepath.Join(root, "f1.txt"), "1\n")
+		mustWriteFile(t, filepath.Join(root, "f2.txt"), "2\n")
+		mustWriteFile(t, filepath.Join(root, "f3.txt"), "3\n")
+	})
+	const user = "agent\nuser-line\nthird\n"
+	mustWriteFile(t, filepath.Join(root, "src", "a.txt"), user)
+
+	s := openSession(t, home, root)
+	undoDiff := diffText(t, timelineRow(t, s, 1), "src/a.txt")
+	s.e.Close()
+	if !strings.Contains(undoDiff, "user-line") || !strings.Contains(undoDiff, "will not change") {
+		t.Fatalf("undo diff:\n%s", undoDiff)
+	}
+
+	if code, out := runOops(t, home, root, "", "undo", "-y"); code != 3 {
+		t.Fatalf("undo %d\n%s", code, out)
+	}
+	s = openSession(t, home, root)
+	defer s.e.Close()
+	redoDiff := diffText(t, timelineRow(t, s, 1), "src/a.txt")
+	if !strings.Contains(redoDiff, "user-line") || !strings.Contains(redoDiff, "will not change") {
+		t.Fatalf("redo diff:\n%s", redoDiff)
+	}
+	if got := mustReadFile(t, filepath.Join(root, "src", "a.txt")); got != user {
+		t.Fatalf("disk %q", got)
+	}
+}
+
+func diffText(t *testing.T, row tui.Row, path string) string {
+	t.Helper()
+	for _, part := range row.Diffs {
+		if strings.Contains(part, path) {
+			return part
+		}
+	}
+	t.Fatalf("no diff for %s in %#v", path, row.Diffs)
+	return ""
+}
+
+func contains(list []string, want string) bool {
+	for _, s := range list {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestRedoDryRunUsesRedoWording(t *testing.T) {
@@ -133,6 +262,34 @@ func assertFileCommands(t *testing.T, out string, want []string) {
 		if !seen[p] {
 			t.Fatalf("missing %s\n%s", p, out)
 		}
+	}
+}
+
+func assertRedoJSONKeepsFile(t *testing.T, out, path string) {
+	t.Helper()
+	var doc struct {
+		Kept []struct {
+			Path string `json:"path"`
+		} `json:"kept"`
+		Commands []string `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if len(doc.Commands) != 0 {
+		t.Fatalf("commands %#v", doc.Commands)
+	}
+	found := false
+	for _, k := range doc.Kept {
+		if k.Path == path {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("kept %#v", doc.Kept)
+	}
+	if strings.Contains(out, "oops undo") {
+		t.Fatalf("undo command in redo json:\n%s", out)
 	}
 }
 

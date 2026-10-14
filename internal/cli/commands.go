@@ -77,7 +77,7 @@ func cmdUndo(opt *options, seq int, files []string, dry, force, yes, running boo
 	}
 	if dry {
 		if opt.json {
-			writeUndoJSON(opt.stdout, res)
+			writeUndoJSON(opt.stdout, res, "undo")
 			return nil
 		}
 		_, sym := stylesOf(opt)
@@ -253,7 +253,7 @@ func newRedoCmd(opt *options) *cobra.Command {
 			}
 			if dry {
 				if opt.json {
-					writeUndoJSON(opt.stdout, res)
+					writeUndoJSON(opt.stdout, res, "redo")
 					return nil
 				}
 				_, sym := stylesOf(opt)

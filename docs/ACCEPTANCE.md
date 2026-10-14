@@ -108,17 +108,18 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-31 partial undo preview is the redo preview | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | The preview says the turn is undone (partial) and `Redo #N would re-apply:`. The lines are the redo plan, so a kept file is `keep 1 file (yours)` and the other files are `add 8 files` |
 | DEMO-32 partial redo toast names the file | PASS | `TestRedoNoticeNamesKeptFile`, `TestPartialRedoToastMatchesCLI`, `TestApplyTimelineRedoNamesKeptFile` | The timeline toast is `! Redid the last change, except 1 file you changed afterwards` and names the file |
 | DEMO-33 preview counts match the applied plan | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | Undo and redo previews, and the confirm card, use the plan Undo and Redo apply. The preview counts equal the applied result: `remove 8 files, keep 1 file (yours)` then `add 8 files, keep 1 file (yours)`. The confirm card says `keep 1 file (yours)` |
-| DEMO-34 hints name only the kept file | PASS | `TestPartialHintsTargetKeptFilesOnly` | After a partial undo and a partial redo, every suggested command in the text and in `--json` is `oops undo N --file` for exactly the kept file. Directories and parent paths are not targets |
+| DEMO-34 hints name only the kept file | PASS | `TestPartialHintsTargetKeptFilesOnly` | After a partial undo, every suggested command in the text and in `--json` is `oops undo N --file` for exactly the kept file. Directories and parent paths are not targets. After a partial redo, the text and `--json` do not suggest `oops undo --file` |
 | DEMO-35 redo dry run says redo | PASS | `TestRedoDryRunUsesRedoWording` | `oops redo -n` is headed `Redo turn #N would` and ends `Run oops redo to apply.` |
 | DEMO-36 a kept file stays the user's | PASS | `TestKeptFileSurvivesUndoRedoUndo`, `TestKeptUserFileSurvivesSecondUndo` | Undo, redo, undo, redo on a turn that kept a user edit leaves that file in place and exits 3. `--force` overwrites it |
 | DEMO-37 timeline color follows the palette | PASS | `TestListRowColors`, `TestDiffColorsAddedAndRemoved` | Agent and time are Muted. `+` / `−` in the file count are Success / Danger. `undone` and `partial` are Warning. Diff additions are Success and removals are Danger. `NO_COLOR` and color off leave the text plain |
 | DEMO-38 the timeline fits the terminal | PASS | `TestConfirmCardKeepsTitle`, `TestClipPreviewShowsSingleHiddenFile`, `TestStackedPreviewBlanksBeforeRan` | At 30 rows the confirm card leaves the title on screen. A `+1 more` that would hide one file shows that file instead. Stacked layout has a blank line before `ran:` |
+| DEMO-39 redo wording and kept-file diff | PASS | `TestRedoDryRunUsesRestoreWording`, `TestKeptPreviewDiffIsDiskVersusApply` | `oops redo -n` and `redo --json` say re-apply or restored for a modified file, not revert. A kept file's timeline diff is the bytes on disk versus the bytes applying would write, and it says the file will not change |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 109 |
+| PASS | 110 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action

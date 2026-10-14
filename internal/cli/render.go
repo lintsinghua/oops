@@ -24,14 +24,14 @@ func stylesOf(opt *options) (ui.Styles, ui.Symbols) {
 
 func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	if opt.json {
-		writeUndoJSON(w, res)
+		writeUndoJSON(w, res, verb)
 		return
 	}
 	if opt.quiet {
 		return
 	}
 	if writtenCount(res.Effects) == 0 && res.Result == "partial" {
-		renderNothingWritten(w, opt, res)
+		renderNothingWritten(w, opt, res, verb)
 		return
 	}
 	st, sym := stylesOf(opt)
@@ -64,11 +64,11 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	}
 	fmt.Fprintln(w, st.Success.Render(title))
 	fmt.Fprintln(w)
-	for _, line := range groupLines(res.Effects, true) {
+	for _, line := range groupLines(res.Effects, true, nil) {
 		fmt.Fprintln(w, "  "+line)
 	}
 	if res.Result == "partial" {
-		writeKeptHints(w, res)
+		writeKeptHints(w, res, verb)
 	}
 	fmt.Fprintln(w)
 	if verb == "redo" {
@@ -78,15 +78,26 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	fmt.Fprintln(w, "  Changed your mind? oops redo")
 }
 
-func writeUndoJSON(w io.Writer, res engine.UndoResult) {
+func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
+	restored := pathsOf(res.Effects, "restore")
+	reverted := pathsOf(res.Effects, "revert")
+	commands := keptFileCommands(res)
+	if verb == "redo" {
+		// A redo puts the agent's bytes back. That is a restore, not a revert,
+		// and the hint must not tell the user to undo the file they just kept.
+		restored = append(restored, reverted...)
+		sort.Strings(restored)
+		reverted = []string{}
+		commands = []string{}
+	}
 	out := map[string]any{
 		"schema_version": 1,
 		"result":         res.Result,
-		"restored":       pathsOf(res.Effects, "restore"),
+		"restored":       restored,
 		"removed":        pathsOf(res.Effects, "remove"),
-		"reverted":       pathsOf(res.Effects, "revert"),
+		"reverted":       reverted,
 		"kept":           keptOf(res.Effects),
-		"commands":       keptFileCommands(res),
+		"commands":       commands,
 		"redo":           "oops redo",
 		"dry_run":        res.DryRun,
 	}
@@ -177,7 +188,10 @@ func keptFileCommands(res engine.UndoResult) []string {
 	return out
 }
 
-func writeKeptHints(w io.Writer, res engine.UndoResult) {
+func writeKeptHints(w io.Writer, res engine.UndoResult, verb string) {
+	if verb == "redo" {
+		return
+	}
 	paths := keptFilePaths(res.Effects)
 	if len(paths) == 0 || res.Turn.Seq <= 0 {
 		return
@@ -188,14 +202,14 @@ func writeKeptHints(w io.Writer, res engine.UndoResult) {
 	}
 }
 
-func renderNothingWritten(w io.Writer, opt *options, res engine.UndoResult) {
+func renderNothingWritten(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	st, sym := stylesOf(opt)
 	fmt.Fprintln(w, st.Success.Render(fmt.Sprintf("%s Nothing was written.", sym.Warn)))
 	fmt.Fprintln(w)
-	for _, line := range groupLines(res.Effects, true) {
+	for _, line := range groupLines(res.Effects, true, nil) {
 		fmt.Fprintln(w, "  "+line)
 	}
-	writeKeptHints(w, res)
+	writeKeptHints(w, res, verb)
 	fmt.Fprintln(w)
 }
 
@@ -258,7 +272,7 @@ func previewEffectLines(effects []engine.Effect) []string {
 	return lines
 }
 
-func groupLines(effects []engine.Effect, past bool) []string {
+func groupLines(effects []engine.Effect, past bool, override map[string]string) []string {
 	labels := map[string]string{
 		"restore": "restore", "remove": "remove", "revert": "revert",
 		"add": "add", "modify": "modify",
@@ -270,6 +284,9 @@ func groupLines(effects []engine.Effect, past bool) []string {
 		labels["revert"] = "reverted"
 		labels["add"] = "added"
 		labels["modify"] = "modified"
+	}
+	for op, label := range override {
+		labels[op] = label
 	}
 	buckets := map[string][]string{}
 	for _, ef := range effects {
@@ -488,7 +505,11 @@ func renderDry(w io.Writer, res engine.UndoResult, sym ui.Symbols, now time.Time
 		apply = "rewind"
 	}
 	fmt.Fprintf(w, "%s turn #%d would %s %s %s %s %s %s\n\n", name, res.Turn.Seq, sym.Sep, res.Turn.Agent, sym.Sep, ui.RelTime(now, res.Turn.StartedAt), sym.Sep, ui.Quote(res.Turn.Prompt, 60))
-	for _, line := range groupLines(res.Effects, false) {
+	var labels map[string]string
+	if verb == "redo" {
+		labels = map[string]string{"revert": "re-apply"}
+	}
+	for _, line := range groupLines(res.Effects, false, labels) {
 		fmt.Fprintln(w, "  "+line)
 	}
 	fmt.Fprintln(w)

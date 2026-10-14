@@ -32,6 +32,9 @@ type Effect struct {
 	Reason string `json:"reason,omitempty"`
 	// Dir marks a directory. Displayed file counts skip these; the apply still runs them.
 	Dir bool `json:"-"`
+	// Before is the file on disk now. Want is what applying this effect would write.
+	Before *snapshot.Meta `json:"-"`
+	Want   *snapshot.Meta `json:"-"`
 }
 
 // UndoResult is the outcome of a mutating command.
@@ -970,7 +973,7 @@ func effects(items []restore.Item) []Effect {
 		if it.Op == "skip" {
 			continue
 		}
-		out = append(out, Effect{Path: it.Path, Op: it.Op, Reason: it.Reason, Dir: effectIsDir(it)})
+		out = append(out, Effect{Path: it.Path, Op: it.Op, Reason: it.Reason, Dir: effectIsDir(it), Before: it.Before, Want: it.Want})
 	}
 	return out
 }

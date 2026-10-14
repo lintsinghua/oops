@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>「Agent 的 Ctrl+Z：一键精准撤销/重做」</strong><br>
+  <strong>Agent 的 Ctrl+Z：一键精准撤销/重做</strong><br>
   Claude Code、Codex、Gemini、Cursor 对文件做的任何改动都能撤销，<code>rm -rf</code> 也不例外。
 </p>
 

@@ -446,7 +446,7 @@ func reportedWrites(out string) int {
 			continue
 		}
 		switch fields[0] {
-		case "restored", "removed", "reverted", "restore", "remove", "revert":
+		case "restored", "removed", "reverted", "restore", "remove", "revert", "re-apply", "re-applied":
 			if v, err := strconv.Atoi(fields[1]); err == nil {
 				n += v
 			}

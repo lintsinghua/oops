@@ -75,7 +75,7 @@ Commands that accept `--json` print a single JSON document with `"schema_version
 }
 ```
 
-`commands` lists `oops undo <turn> --file <path> --force` for each kept file. Directory paths and parent paths are omitted. `kept` lists those same files.
+For undo, `commands` lists `oops undo <turn> --file <path> --force` for each kept file. Directory paths and parent paths are omitted. `kept` lists those same files. A redo lists a content change under `restored`, not `reverted`, and `commands` is empty: redo does not suggest undoing a file you kept.
 
 ## `oops doctor --json`
 
