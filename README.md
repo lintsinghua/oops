@@ -99,7 +99,7 @@ $ oops undo
   Changed your mind? oops redo
 ```
 
-Inside Claude Code you can also type `/oops` — it runs locally and never reaches the model, so it costs no tokens.
+Inside Claude Code you can also type `/oops` — it runs locally and never reaches the model, so it costs no tokens. Claude Code shows that reply as a hook decision titled "operation blocked by hook". The line that starts with `✓ oops` is the result.
 
 Changed your mind about the setup? `oops init --undo` removes exactly what oops added and leaves the rest of your config alone.
 
@@ -129,7 +129,7 @@ You only need to remember `oops`. The rest are shortcuts for people who know wha
 
 | Agent | Connects through | Turn = | In-session | Notes |
 |---|---|---|---|---|
-| Claude Code | hooks in `~/.claude/settings.json` | prompt → `Stop` | `/oops` | Runs locally, no tokens |
+| Claude Code | hooks in `~/.claude/settings.json` | prompt → `Stop` | `/oops` | Runs locally, no tokens. Claude shows it as "operation blocked by hook"; the `✓ oops` line is the result |
 | Codex | `~/.codex/hooks.json` | prompt → `Stop` / interrupt | `/oops` when the prompt hook includes that text | Trust the hooks once with `/hooks`. Non-interactive: `codex exec --dangerously-bypass-hook-trust`. `!oops` is not installed |
 | Gemini CLI | `~/.gemini/settings.json` | `BeforeAgent` → `AfterAgent` | `/oops` when `BeforeAgent` includes the prompt | Fine alongside Gemini's own checkpointing. No separate slash hook |
 | Cursor CLI | `~/.cursor/hooks.json` | prompt → `stop` | `!oops` | In `-p` mode, prefer `oops run -- cursor-agent` |
@@ -156,7 +156,7 @@ Planned for v0.2: GitHub Copilot CLI, opencode, Qwen Code, Amp, Goose. [Request 
 - **Incremental and content-addressed.** A stat cache means only changed files are read and hashed. Contents are deduplicated, zstd-compressed and immutable — the model is git's (blobs, trees), the storage is not.
 - **Your edits are safe.** Undo compares three states per file: before the turn, after the turn, and now. Anything you (or another agent) changed afterwards is kept and reported, not overwritten. `--force` overrides, and the overwritten version is saved first.
 - **Undo is undoable.** Every undo, rewind and restore takes a safety snapshot first, so `oops redo` always gets you back.
-- **Not in your way.** Hook processes always exit 0, and there is no daemon. The turn-start hook stores the pre snapshot before it returns, so a following edit is not what undo restores. The turn-end hook records the job and returns; a detached process stores the post snapshot and then applies retention. The next turn waits for that post snapshot (at most 30s, then the waiting process finishes it), so the boundary stays intact. If that child dies, the job file remains and the next command finishes the turn. Hooks write to stdout only to answer `/oops`, or, on Claude Code, to pass a `systemMessage` when a snapshot was partial or a file was too large to store. Other agents show that notice on the next `oops` command. Each reason is shown once. A hard timeout (default 10s, measured from the start of that scan) marks a snapshot partial rather than blocking the agent.
+- **Not in your way.** Hook processes always exit 0, and there is no daemon. The turn-start hook stores the pre snapshot before it returns, so a following edit is not what undo restores. The turn-end hook records the job and returns; a detached process stores the post snapshot and then applies retention. The next turn waits for that post snapshot (at most 30s, then the waiting process finishes it), so the boundary stays intact. If the previous turn is still open, the pre hook closes it from the tree at that moment before storing the new pre snapshot, including when the agent process exited right after Stop. A later background scan does not overwrite that post. If that child dies, the job file remains and the next command finishes the turn. Hooks write to stdout only to answer `/oops`, or, on Claude Code, to pass a `systemMessage` when a snapshot was partial or a file was too large to store. Other agents show that notice on the next `oops` command. Each reason is shown once. A hard timeout (default 10s, measured from the start of that scan) marks a snapshot partial rather than blocking the agent.
 - **Not in your repo.** Snapshot data is never written inside the workspace. oops does not write to `.git`, create branches, or stash. `oops init --project` is the exception: it writes the agent's own project config, such as `.claude/settings.json`. Snapshots live in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). `OOPS_HOME` overrides the data directory.
 - **What's included.** Files that are not gitignored, including untracked files, plus protected files even when gitignored (`.env`, `.env.*`, `.envrc`, `*.local`, `*.local.*`, `.dev.vars`, `local.settings.json`). A gitignored path is skipped even if it was force-added. Heavy directories (`node_modules/`, `.venv/`, `target/`, …) are skipped. `dist/` and `build/` are skipped only when a gitignore rule also matches. Tune it with a `.oopsignore` (gitignore syntax). Files over 50 MB are recorded but not stored. `oops doctor`, `oops show`, and the next command say they are unprotected.
 

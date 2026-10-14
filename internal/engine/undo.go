@@ -26,6 +26,8 @@ type Effect struct {
 	Path   string `json:"path"`
 	Op     string `json:"op"`
 	Reason string `json:"reason,omitempty"`
+	// Dir marks a directory. Displayed file counts skip these; the apply still runs them.
+	Dir bool `json:"-"`
 }
 
 // UndoResult is the outcome of a mutating command.
@@ -559,9 +561,29 @@ func effects(items []restore.Item) []Effect {
 		if it.Op == "skip" {
 			continue
 		}
-		out = append(out, Effect{Path: it.Path, Op: it.Op, Reason: it.Reason})
+		out = append(out, Effect{Path: it.Path, Op: it.Op, Reason: it.Reason, Dir: effectIsDir(it)})
 	}
 	return out
+}
+
+func effectIsDir(it restore.Item) bool {
+	return metaIsDir(it.Want) || metaIsDir(it.Before) || metaIsDir(it.After)
+}
+
+func metaIsDir(m *snapshot.Meta) bool {
+	return m != nil && m.Kind == snapshot.KindDir
+}
+
+// CountFileEffects counts effects that change a file. Directories are not included.
+func CountFileEffects(effects []Effect) int {
+	n := 0
+	for _, ef := range effects {
+		if ef.Dir || ef.Op == "skip" || ef.Op == "kept" || ef.Op == "unprotected" {
+			continue
+		}
+		n++
+	}
+	return n
 }
 
 func resultOf(items []restore.Item) string {

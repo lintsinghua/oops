@@ -99,7 +99,7 @@ $ oops undo
   Changed your mind? oops redo
 ```
 
-在 Claude Code 里也可以直接输入 `/oops`。它在本地执行，不会发给模型，不消耗 token。
+在 Claude Code 里也可以直接输入 `/oops`。它在本地执行，不会发给模型，不消耗 token。Claude Code 会把这段回复显示成 hook 拦截（“operation blocked by hook”）。以 `✓ oops` 开头的那一行是结果，不是报错。
 
 不想用了？`oops init --undo` 只移除 oops 自己写入的配置，其他设置一行不动。
 
@@ -129,7 +129,7 @@ $ oops undo
 
 | Agent | 接入方式 | 一轮的边界 | 会话内 | 说明 |
 |---|---|---|---|---|
-| Claude Code | `~/.claude/settings.json` 中的 hooks | 提交 prompt → `Stop` | `/oops` | 本地执行，不耗 token |
+| Claude Code | `~/.claude/settings.json` 中的 hooks | 提交 prompt → `Stop` | `/oops` | 本地执行，不耗 token。Claude 显示为 “operation blocked by hook”；`✓ oops` 那一行是结果 |
 | Codex | `~/.codex/hooks.json` | 提交 prompt → `Stop` / 中断 | prompt hook 里带有这段文字时的 `/oops` | 需在 `/hooks` 中信任一次。非交互运行用 `codex exec --dangerously-bypass-hook-trust`。不会安装 `!oops` |
 | Gemini CLI | `~/.gemini/settings.json` | `BeforeAgent` → `AfterAgent` | `BeforeAgent` 带上 prompt 时的 `/oops` | 与 Gemini 自带检查点可共存。没有单独的 slash hook |
 | Cursor CLI | `~/.cursor/hooks.json` | 提交 prompt → `stop` | `!oops` | `-p` 模式建议用 `oops run -- cursor-agent` |
@@ -156,7 +156,7 @@ v0.2 计划支持：GitHub Copilot CLI、opencode、Qwen Code、Amp、Goose。[�
 - **增量、内容寻址**。借助 stat 缓存，只读取和哈希有变化的文件。内容去重、zstd 压缩、不可变——数据模型借鉴 git（blob、tree），但不使用 git 存储。
 - **你的改动是安全的**。撤销时对每个文件比较三个状态：轮前、轮后、现在。这一轮之后被你（或别的 Agent）改过的文件会被保留并列出，不会被覆盖。`--force` 可以强制覆盖，被覆盖的版本会先保存下来。
 - **撤销也能撤销**。每次 undo、rewind、restore 之前都先拍一张安全快照，`oops redo` 一定能回到原样。
-- **不打扰**。hook 进程永远 exit 0，没有常驻进程。轮次开始的 hook 会等 pre 快照落盘才返回，后面的修改不会被当成撤销要恢复的原件。轮次结束的 hook 记下任务后立刻返回，由脱离的进程写入 post 快照并做保留清理。下一轮会等这张 post 快照（最多 30 秒，超时后由等待的进程自己写完），轮次边界不会错。后台进程如果中途退出，任务文件还在，下一条命令会把这一轮写完。hook 只在回答 `/oops` 时写 stdout；Claude Code 上，快照不完整或有文件大到没存下内容时，还会输出一条 `systemMessage`。其他 Agent 在下一次执行 `oops` 时看到同一条提示。同一个原因只提示一次。硬超时默认 10 秒，从这次扫描开始计时，超时只把快照标成 partial，不阻塞 Agent。
+- **不打扰**。hook 进程永远 exit 0，没有常驻进程。轮次开始的 hook 会等 pre 快照落盘才返回，后面的修改不会被当成撤销要恢复的原件。轮次结束的 hook 记下任务后立刻返回，由脱离的进程写入 post 快照并做保留清理。下一轮会等这张 post 快照（最多 30 秒，超时后由等待的进程自己写完），轮次边界不会错。如果上一轮还开着，pre hook 会先按当时的目录树把它收完，再存新的 pre 快照；Agent 进程在 Stop 之后立刻退出也一样。之后才跑完的后台扫描不会覆盖这张 post。后台进程如果中途退出，任务文件还在，下一条命令会把这一轮写完。hook 只在回答 `/oops` 时写 stdout；Claude Code 上，快照不完整或有文件大到没存下内容时，还会输出一条 `systemMessage`。其他 Agent 在下一次执行 `oops` 时看到同一条提示。同一个原因只提示一次。硬超时默认 10 秒，从这次扫描开始计时，超时只把快照标成 partial，不阻塞 Agent。
 - **不碰你的仓库**。快照数据不会写进工作区。不写 `.git`，不建分支，不 stash。例外是 `oops init --project`：它会写入 Agent 自己的项目配置，例如 `.claude/settings.json`。快照在 `~/.local/share/oops`（Windows 为 `%LOCALAPPDATA%\oops`）。`OOPS_HOME` 可以改数据目录。
 - **收录范围**。没被 gitignore 的文件（含未跟踪文件），再加上即使被 gitignore 也受保护的文件（`.env`、`.env.*`、`.envrc`、`*.local`、`*.local.*`、`.dev.vars`、`local.settings.json`）。被 gitignore 的路径即使曾经 `git add -f` 也会跳过。`node_modules/`、`.venv/`、`target/` 等重目录自动跳过。`dist/` 和 `build/` 只在同时命中 gitignore 规则时跳过。可用 `.oopsignore`（gitignore 语法）调整。超过 50 MB 的文件只记录元数据不存内容。`oops doctor`、`oops show` 和下一条命令会说明它们未受保护。
 

@@ -42,12 +42,8 @@ func (e *Engine) QueueFinish(ws Workspace, session string, late bool) error {
 }
 
 func (e *Engine) runningTurn(ws Workspace, session string) (meta.Turn, error) {
-	t, err := e.DB.RunningBySession(ws.ID, session)
-	if err == nil {
-		return t, nil
-	}
-	if !meta.IsNotFound(err) {
-		return meta.Turn{}, err
+	if session != "" {
+		return e.DB.RunningBySession(ws.ID, session)
 	}
 	running, rerr := e.DB.RunningTurns(ws.ID)
 	if rerr != nil {
@@ -56,7 +52,33 @@ func (e *Engine) runningTurn(ws Workspace, session string) (meta.Turn, error) {
 	if len(running) == 1 {
 		return running[0], nil
 	}
-	return meta.Turn{}, err
+	return meta.Turn{}, os.ErrNotExist
+}
+
+// SealRunning closes every running turn from the tree as it is now.
+// The next turn's pre hook calls this so a background post snapshot cannot
+// later attribute that turn's edits to the previous one.
+func (e *Engine) SealRunning(ctx context.Context, ws Workspace) error {
+	if err := e.lockPending(ws); err != nil {
+		if err := e.WaitPending(ctx, ws); err != nil {
+			return err
+		}
+		if err := e.lockPending(ws); err != nil {
+			return err
+		}
+	}
+	defer e.unlockPending(ws)
+	running, err := e.DB.RunningTurns(ws.ID)
+	if err != nil || len(running) == 0 {
+		return err
+	}
+	for _, t := range running {
+		if _, err := e.finish(ctx, ws, t, true); err != nil {
+			return err
+		}
+		_ = os.Remove(filepath.Join(e.pendingDir(ws.ID), strconv.Itoa(t.Seq)+".json"))
+	}
+	return nil
 }
 
 // pendingWait is the longest a command waits for a background post snapshot

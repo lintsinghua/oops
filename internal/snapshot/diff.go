@@ -22,6 +22,31 @@ type Change struct {
 	Ignored    bool
 }
 
+// IsDirChange reports a directory entry. Directories are not file changes.
+func IsDirChange(c Change) bool {
+	if c.Pre != nil && c.Pre.Kind == KindDir {
+		return true
+	}
+	return c.Post != nil && c.Post.Kind == KindDir
+}
+
+// FileChanges keeps file and symlink changes. Directory entries are left out
+// so every count, list, and preview uses the same rule.
+func FileChanges(changes []Change) []Change {
+	out := make([]Change, 0, len(changes))
+	for _, c := range changes {
+		if !IsDirChange(c) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// CountFileChanges is the number of file and symlink changes.
+func CountFileChanges(changes []Change) int {
+	return len(FileChanges(changes))
+}
+
 // Diff compares pre and post flattened trees.
 func Diff(pre, post map[string]Meta) []Change {
 	keys := map[string]struct{}{}

@@ -32,6 +32,16 @@ type Action struct {
 	Seq  int
 }
 
+// Apply runs undo, rewind, or redo and returns the refreshed rows plus a one-line notice.
+// When it is set, the timeline stays open. When it is nil, a confirmed action quits.
+type ApplyFunc func(Action) ([]Row, string, error)
+
+type refreshedMsg struct {
+	rows   []Row
+	notice string
+	err    error
+}
+
 // Model is the timeline.
 type Model struct {
 	Rows      []Row
@@ -54,6 +64,7 @@ type Model struct {
 	quit      bool
 	notice    string
 	fileIdx   int
+	Apply     ApplyFunc
 }
 
 // New builds a model. rows are newest-first.
@@ -86,6 +97,22 @@ func (m Model) Init() tea.Cmd { return nil }
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case refreshedMsg:
+		m.confirm = false
+		m.pending = ""
+		m.action = Action{}
+		m.diff = false
+		if msg.err != nil {
+			m.notice = msg.err.Error()
+		} else {
+			m.notice = msg.notice
+		}
+		if msg.rows != nil {
+			m.Rows = msg.rows
+			m.cursor = firstSelectable(m.visible())
+			m.fileIdx = 0
+		}
+		return m, nil
 	case tea.WindowSizeMsg:
 		m.Width, m.Height = msg.Width, msg.Height
 		m.diffVP.Width = msg.Width - 2
@@ -179,6 +206,10 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				m.notice = fmt.Sprintf("#%d is still running (%s). Stop the agent first, then press enter.", row.Seq, row.Agent)
 				return m, nil
 			}
+			m.pending = "undo"
+			if row.Status == "undone" {
+				m.pending = "redo"
+			}
 			m.confirm = true
 			m.yes = true
 		}
@@ -205,8 +236,11 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.yes = true
 		}
 	case "R":
-		m.action = Action{Kind: "redo"}
-		return m, tea.Quit
+		if m.Apply == nil {
+			m.action = Action{Kind: "redo"}
+			return m, tea.Quit
+		}
+		return m, m.runApply(Action{Kind: "redo"})
 	case "/":
 		m.filtering = true
 	case "?":
@@ -231,15 +265,25 @@ func (m Model) confirmDo() (tea.Model, tea.Cmd) {
 	if kind == "" {
 		kind = "undo"
 	}
-	m.action = Action{Kind: kind, Seq: row.Seq}
-	return m, tea.Quit
+	action := Action{Kind: kind, Seq: row.Seq}
+	if m.Apply == nil {
+		m.action = action
+		return m, tea.Quit
+	}
+	m.confirm = false
+	return m, m.runApply(action)
+}
+
+func (m Model) runApply(action Action) tea.Cmd {
+	apply := m.Apply
+	return func() tea.Msg {
+		rows, notice, err := apply(action)
+		return refreshedMsg{rows: rows, notice: notice, err: err}
+	}
 }
 
 func (m *Model) showDiff(row Row) {
-	parts := row.Diffs
-	if len(parts) == 0 && row.Diff != "" {
-		parts = []string{row.Diff}
-	}
+	parts := fileDiffs(row)
 	if len(parts) == 0 {
 		m.diffVP.SetContent("  no diff\n")
 		return
@@ -258,7 +302,7 @@ func (m *Model) stepFile(d int) {
 	if !ok {
 		return
 	}
-	n := len(row.Diffs)
+	n := len(fileDiffs(row))
 	if n == 0 {
 		return
 	}
@@ -343,11 +387,7 @@ func (m Model) body() string {
 		b.WriteString(m.styles.Warning.Render("  "+m.sym.Warn+" "+m.notice) + "\n")
 	}
 	vis := m.visible()
-	narrow := m.Width > 0 && m.Width < 80
-	leftW := m.Width
-	if !narrow && m.Width > 20 {
-		leftW = m.Width * 55 / 100
-	}
+	leftW, rightW, narrow := paneWidths(m.Width)
 	var left, right strings.Builder
 	for i, r := range vis {
 		mark := "  "
@@ -363,7 +403,7 @@ func (m Model) body() string {
 		left.WriteString(line + "\n")
 	}
 	if row, ok := m.selected(); ok {
-		right.WriteString(row.Preview)
+		right.WriteString(fitPreview(row.Preview, rightW))
 	}
 	if narrow {
 		b.WriteString(left.String())
@@ -381,18 +421,94 @@ func (m Model) body() string {
 
 func (m Model) line(r Row, width int) string {
 	if r.Gap {
-		return fmt.Sprintf(" %s    %-7s %-11s %s", m.sym.Gap, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11), r.Prompt)
+		s := fmt.Sprintf(" %s    %-7s %-11s %s", m.sym.Gap, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11), r.Prompt)
+		return ui.Truncate(s, max(10, width))
 	}
-	prompt := ui.Quote(r.Prompt, 40)
 	files := ui.Plural(r.Files, "file", "files")
-	s := fmt.Sprintf(" #%-4d %-7s %-11s %-42s %s", r.Seq, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11), prompt, files)
-	if r.Status == "running" {
-		s += "  running"
+	status := ""
+	if r.Status == "running" || r.Status == "undone" {
+		status = "  " + r.Status
 	}
-	if r.Status == "undone" {
-		s += "  undone"
+	prefix := fmt.Sprintf(" #%-4d %-7s %-11s ", r.Seq, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11))
+	suffix := " " + files + status
+	prompt := ""
+	if r.Prompt != "" {
+		inner := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(suffix) - 2
+		if inner < 1 {
+			inner = 1
+		}
+		prompt = ui.Quote(r.Prompt, inner)
+		for ui.DisplayWidth(prefix+prompt+suffix) > width && inner > 1 {
+			inner--
+			prompt = ui.Quote(r.Prompt, inner)
+		}
 	}
-	return ui.Truncate(s, max(10, width))
+	s := prefix + prompt + suffix
+	if width > 0 && ui.DisplayWidth(s) > width {
+		return ui.Truncate(s, width)
+	}
+	return s
+}
+
+func paneWidths(width int) (left, right int, narrow bool) {
+	if width < 80 {
+		return width, 0, true
+	}
+	right = width * 34 / 100
+	if right > 52 {
+		right = 52
+	}
+	if right < 30 {
+		right = 30
+	}
+	left = width - right - 3
+	if left < 48 {
+		return width, 0, true
+	}
+	return left, right, false
+}
+
+func fitPreview(preview string, width int) string {
+	if width < 8 {
+		width = 8
+	}
+	lines := strings.Split(preview, "\n")
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(ui.MiddleTruncate(line, width))
+	}
+	return b.String()
+}
+
+func fileDiffs(row Row) []string {
+	parts := row.Diffs
+	if len(parts) == 0 && row.Diff != "" {
+		parts = []string{row.Diff}
+	}
+	var out []string
+	for _, p := range parts {
+		if dirDiff(p) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func dirDiff(s string) bool {
+	if strings.Contains(s, "@@") {
+		return false
+	}
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasSuffix(line, "/") {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) card() string {
@@ -400,7 +516,17 @@ func (m Model) card() string {
 	if !ok {
 		return ""
 	}
-	undo := "[ Undo ]"
+	label := "Undo"
+	title := fmt.Sprintf("Undo turn #%d?", row.Seq)
+	switch {
+	case m.pending == "rewind":
+		label = "Rewind"
+		title = fmt.Sprintf("Rewind to before #%d?", row.Seq)
+	case m.pending == "redo" || row.Status == "undone":
+		label = "Redo"
+		title = fmt.Sprintf("Redo turn #%d?", row.Seq)
+	}
+	undo := "[ " + label + " ]"
 	cancel := "Cancel"
 	if m.yes {
 		undo = m.styles.Accent.Render(undo)
@@ -408,10 +534,6 @@ func (m Model) card() string {
 	} else {
 		cancel = m.styles.Accent.Render(cancel)
 		undo = m.styles.Muted.Render(undo)
-	}
-	title := fmt.Sprintf("Undo turn #%d?", row.Seq)
-	if m.pending == "rewind" {
-		title = fmt.Sprintf("Rewind to before #%d?", row.Seq)
 	}
 	inner := fmt.Sprintf("  %s\n  %s · %s\n\n  %s\n  Your changes after this turn are kept.\n\n        %s    %s  ",
 		title, ui.Quote(row.Prompt, 40), row.Agent, ui.Plural(row.Files, "file", "files"), undo, cancel)

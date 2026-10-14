@@ -41,6 +41,20 @@ func TestHelp(t *testing.T) {
 	}
 }
 
+func TestInitHelpShowsFlags(t *testing.T) {
+	code, out := execute(t, "init", "-h")
+	if code != 0 {
+		t.Fatalf("exit %d %s", code, out)
+	}
+	if !strings.Contains(out, "--undo") || !strings.Contains(out, "Connect oops") {
+		t.Fatalf("init help:\n%s", out)
+	}
+	_, root := execute(t, "--help")
+	if strings.Contains(root, "--undo") {
+		t.Fatalf("root help listed init flags:\n%s", root)
+	}
+}
+
 func TestUnknownCommand(t *testing.T) {
 	code, out := execute(t, "not-a-command")
 	if code == 0 {

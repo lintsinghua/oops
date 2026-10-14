@@ -28,3 +28,25 @@ func TestAnnotateBinaryAndText(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestFileChangesSkipDirectories(t *testing.T) {
+	changes := []Change{
+		{Path: "onlydir", Action: "added", Post: &Meta{Kind: KindDir}},
+		{Path: "nested", Action: "added", Post: &Meta{Kind: KindDir}},
+		{Path: "nested/a.txt", Action: "added", Post: &Meta{Kind: KindFile}},
+		{Path: "b.txt", Action: "added", Post: &Meta{Kind: KindFile}},
+		{Path: "link", Action: "added", Post: &Meta{Kind: KindSymlink}},
+	}
+	got := FileChanges(changes)
+	if CountFileChanges(changes) != 3 || len(got) != 3 {
+		t.Fatalf("count %d %+v", CountFileChanges(changes), got)
+	}
+	if got[0].Path != "nested/a.txt" && got[0].Path != "b.txt" && got[0].Path != "link" {
+		t.Fatal(got[0].Path)
+	}
+	for _, c := range got {
+		if IsDirChange(c) {
+			t.Fatalf("directory %s", c.Path)
+		}
+	}
+}

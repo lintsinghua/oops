@@ -46,16 +46,18 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 		title = fmt.Sprintf("%s Rewound to before #%d", sym.OK, res.Seqs[0])
 	}
 	if verb == "redo" {
-		n := 0
-		for _, ef := range res.Effects {
-			if ef.Op != "kept" && ef.Op != "skip" {
-				n++
-			}
-		}
-		title = fmt.Sprintf("%s Redid the last change — back to how it was (%s).", sym.OK, ui.Plural(n, "file", "files"))
+		title = fmt.Sprintf("%s Redid the last change — back to how it was (%s).", sym.OK, ui.Plural(engine.CountFileEffects(res.Effects), "file", "files"))
 	}
 	if res.Result == "partial" {
-		kept := countOp(res.Effects, "kept") + countOp(res.Effects, "unprotected")
+		kept := 0
+		for _, ef := range res.Effects {
+			if ef.Dir {
+				continue
+			}
+			if ef.Op == "kept" || ef.Op == "unprotected" {
+				kept++
+			}
+		}
 		title = fmt.Sprintf("%s Undid turn #%d, except %s you changed afterwards.", sym.Warn, res.Turn.Seq, ui.Plural(kept, "file", "files"))
 	}
 	fmt.Fprintln(w, st.Success.Render(title))
@@ -72,6 +74,10 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 		}
 	}
 	fmt.Fprintln(w)
+	if verb == "redo" {
+		fmt.Fprintln(w, "  Changed your mind? oops undo")
+		return
+	}
 	fmt.Fprintln(w, "  Changed your mind? oops redo")
 }
 
@@ -149,16 +155,6 @@ func writtenCount(effects []engine.Effect) int {
 	return n
 }
 
-func countOp(effects []engine.Effect, op string) int {
-	n := 0
-	for _, ef := range effects {
-		if ef.Op == op {
-			n++
-		}
-	}
-	return n
-}
-
 func groupLines(effects []engine.Effect, past bool) []string {
 	labels := map[string]string{
 		"restore": "restore", "remove": "remove", "revert": "revert",
@@ -171,7 +167,7 @@ func groupLines(effects []engine.Effect, past bool) []string {
 	}
 	buckets := map[string][]string{}
 	for _, ef := range effects {
-		if ef.Op == "skip" {
+		if ef.Op == "skip" || ef.Dir {
 			continue
 		}
 		op := ef.Op
@@ -259,8 +255,8 @@ func renderList(w io.Writer, opt *options, e *engine.Engine, ws engine.Workspace
 		fmt.Fprintln(w, line)
 		if i+1 < len(turns) {
 			gap, err := e.GapFiles(turns[i+1], turns[i])
-			if err == nil && len(gap) > 0 {
-				fmt.Fprintf(w, "  %s    %-7s %-11s %s\n", sym.Gap, "you", ui.Pad(ui.RelTime(now, turns[i].StartedAt), 11), ui.Plural(len(gap), "file changed outside agents", "files changed outside agents"))
+			if n := snapshot.CountFileChanges(gap); err == nil && n > 0 {
+				fmt.Fprintf(w, "  %s    %-7s %-11s %s\n", sym.Gap, "you", ui.Pad(ui.RelTime(now, turns[i].StartedAt), 11), ui.Plural(n, "file changed outside agents", "files changed outside agents"))
 			}
 		}
 	}
@@ -314,10 +310,7 @@ func renderShow(w io.Writer, opt *options, t meta.Turn, changes []snapshot.Chang
 		fmt.Fprintln(w, ui.Quote(t.Prompt, 0))
 	}
 	fmt.Fprintln(w)
-	for _, c := range changes {
-		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
-			continue
-		}
+	for _, c := range snapshot.FileChanges(changes) {
 		action := c.Action
 		extra := ""
 		if c.Binary {
@@ -348,11 +341,9 @@ func writeShowJSON(w io.Writer, t meta.Turn, changes []snapshot.Change) error {
 		Untracked  bool   `json:"untracked,omitempty"`
 		Ignored    bool   `json:"ignored,omitempty"`
 	}
-	files := make([]row, 0, len(changes))
-	for _, c := range changes {
-		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
-			continue
-		}
+	kept := snapshot.FileChanges(changes)
+	files := make([]row, 0, len(kept))
+	for _, c := range kept {
 		files = append(files, row{Path: c.Path, Action: c.Action, Insertions: c.Insertions, Deletions: c.Deletions, Binary: c.Binary, Untracked: c.Untracked, Ignored: c.Ignored})
 	}
 	ended := ""

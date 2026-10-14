@@ -65,6 +65,100 @@ func TestTimelineNarrowAndEmpty(t *testing.T) {
 	}
 }
 
+func TestTimelineUndoneMarker(t *testing.T) {
+	rows := sampleRows()
+	rows[0].Status = "undone"
+	rows[0].Files = 1
+	m := New(rows, "proj", "", false, true)
+	m.Width = 120
+	m.Height = 24
+	view := m.View()
+	if !strings.Contains(view, "undone") || !strings.Contains(view, "1 file") {
+		t.Fatalf("marker missing:\n%s", view)
+	}
+	var model tea.Model = m
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(Model)
+	if m.pending != "redo" || !strings.Contains(m.View(), "Redo turn #2?") {
+		t.Fatalf("pending %q\n%s", m.pending, m.View())
+	}
+}
+
+func TestTimelineDiffSkipsDirectory(t *testing.T) {
+	rows := []Row{{
+		Seq: 2, Agent: "claude", When: "1m ago", Prompt: "edit", Files: 1, Status: "done",
+		Diffs: []string{"restore sub/\n", "diff a.txt\n@@ -1 +1 @@\n+a\n"},
+	}}
+	m := New(rows, "proj", "", false, true)
+	var model tea.Model = m
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m = model.(Model)
+	view := m.View()
+	if strings.Contains(view, "restore sub/") || !strings.Contains(view, "diff a.txt") {
+		t.Fatalf("view:\n%s", view)
+	}
+}
+
+func TestTimelineRefreshInPlace(t *testing.T) {
+	m := New(sampleRows(), "proj", "", false, true)
+	m.Apply = func(a Action) ([]Row, string, error) {
+		if a.Kind != "undo" || a.Seq != 2 {
+			t.Fatalf("action %+v", a)
+		}
+		next := sampleRows()
+		next[0].Status = "undone"
+		return next, "Undid #2", nil
+	}
+	var model tea.Model = m
+	var cmd tea.Cmd
+	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("first enter should only confirm")
+	}
+	model, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected apply")
+	}
+	model, cmd = model.Update(cmd())
+	if cmd != nil {
+		t.Fatal("refresh should stay open")
+	}
+	m = model.(Model)
+	if m.quit || m.confirm || m.Action().Kind != "" {
+		t.Fatalf("quit=%v confirm=%v action=%+v", m.quit, m.confirm, m.Action())
+	}
+	view := m.View()
+	if !strings.Contains(view, "undone") || !strings.Contains(view, "Undid #2") {
+		t.Fatalf("view:\n%s", view)
+	}
+}
+
+func TestTimelinePromptUsesRemainingWidth(t *testing.T) {
+	prompt := "please refactor the authentication middleware and add tests for the session store"
+	path := "internal/very/long/path/that/keeps/going/until/the/filename/handler.go"
+	rows := []Row{{
+		Seq: 3, Agent: "claude", When: "1 min ago", Prompt: prompt, Files: 1, Status: "undone",
+		Preview: "  revert  " + path,
+	}}
+	m := New(rows, "proj", "", false, true)
+	m.Width = 120
+	m.Height = 24
+	view := m.View()
+	if !strings.Contains(view, "1 file") || !strings.Contains(view, "undone") {
+		t.Fatalf("columns clipped:\n%s", view)
+	}
+	if !strings.Contains(view, "please refactor the auth") {
+		t.Fatalf("prompt too short:\n%s", view)
+	}
+	left, right, _ := strings.Cut(view, " │ ")
+	if strings.Count(left, "…") > 1 {
+		t.Fatalf("extra ellipsis column:\n%s", left)
+	}
+	if !strings.Contains(right, "handler.go") || strings.Contains(right, path) {
+		t.Fatalf("path:\n%s", right)
+	}
+}
+
 func TestTimelineMoveAndRewind(t *testing.T) {
 	m := New(sampleRows(), "proj", "", false, true)
 	var model tea.Model = m
