@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -47,6 +48,14 @@ func TestFormatHelpers(t *testing.T) {
 	}
 	if Pad("a", 3) != "a  " || Pad("abcd", 2) != "abcd" {
 		t.Fatal("pad")
+	}
+	long := "internal/very/long/path/handler.go"
+	mid := MiddleTruncate(long, 24)
+	if !strings.Contains(mid, "…") || !strings.HasSuffix(mid, "handler.go") || strings.Contains(mid, long) {
+		t.Fatalf("middle %q", mid)
+	}
+	if MiddleTruncate("short", 20) != "short" {
+		t.Fatal("short path")
 	}
 	if DisplayWidth("ab") != 2 || RuneLen("é") != 1 {
 		t.Fatal("width")

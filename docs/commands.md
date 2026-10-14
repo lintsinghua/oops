@@ -39,408 +39,311 @@ Learn more: https://oops.sh/docs
 ## `oops diff`
 
 ```
-Ctrl+Z for coding agents.
+Show a turn's diff
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops diff [turn] [-- path...] [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops diff
+  oops diff 12 --stat
+  oops diff -- src/app.ts
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+      --name-only   List paths only
+      --no-pager    Print the diff without a pager
+      --reverse     Show the undo direction
+      --stat        Show a summary instead of a patch
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops doctor`
 
 ```
-Ctrl+Z for coding agents.
+Check that everything works
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops doctor [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops doctor
+  oops doctor --json
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
-
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops gc`
 
 ```
-Ctrl+Z for coding agents.
+Free up snapshot storage
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops gc [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops gc -n
+  oops gc
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+      --all       Delete this workspace's snapshots
+  -n, --dry-run   Show what would be freed
+      --global    With --all, delete every workspace
+  -y, --yes       Skip confirmation
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops init`
 
 ```
-Ctrl+Z for coding agents.
+Connect oops to the agents on this machine
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops init [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops init -y
+  oops init --undo
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+      --agent stringArray   Only this agent (repeatable)
+      --delete-data         With --undo, also delete snapshot data
+      --print               Print the config fragment without writing it
+      --project             Write project config instead of user config
+      --undo                Remove oops hooks
+  -y, --yes                 Connect without asking
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops list`
 
 ```
-Ctrl+Z for coding agents.
+List recent turns
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops list [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Aliases:
+  list, ls
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Examples:
+  oops list
+  oops list -n 5
+  oops list --json
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
+Flags:
+      --agent string   Only this agent
+      --all            Include safety snapshots
+  -n, --n int          How many turns to show (default 10)
+      --since string   Only turns newer than this duration (for example 24h)
 
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops redo`
 
 ```
-Ctrl+Z for coding agents.
+Reverse the last undo, rewind or restore
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops redo [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops redo
+  oops redo -n
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+  -n, --dry-run   Preview without changing files
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops restore`
 
 ```
-Ctrl+Z for coding agents.
+Bring files back as they were before a turn
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops restore <path>... --at <turn> [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops restore src/app.ts --at 12
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+      --at int    Turn to restore from (the files as they were before it)
+  -n, --dry-run   Preview without changing files
+      --force     Overwrite a file that differs
+  -y, --yes       Skip confirmation
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops rewind`
 
 ```
-Ctrl+Z for coding agents.
+Go back to before a turn
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops rewind <turn> [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops rewind 12
+  oops rewind 12 -n
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+  -n, --dry-run   Preview without changing files
+      --force     Overwrite files you changed after these turns
+  -y, --yes       Skip confirmation
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops run`
 
 ```
-Ctrl+Z for coding agents.
+Protect any tool that has no hooks
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops run -- <command> [args...] [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops run -- claude
+  oops run --idle 3s -- npm test
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+      --idle string   Silence before an automatic checkpoint (default 3s)
+      --name string   Label stored on the turn
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops show`
 
 ```
-Ctrl+Z for coding agents.
+Show what a turn changed
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops show [turn] [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops show
+  oops show 12
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
-
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops snap`
 
 ```
-Ctrl+Z for coding agents.
+Save a checkpoint now
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops snap [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops snap -m "before the experiment"
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+  -n, --dry-run          Preview without writing a checkpoint
+  -m, --message string   Note stored with the checkpoint
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 
 ## `oops undo`
 
 ```
-Ctrl+Z for coding agents.
+Undo the last turn, or a specific one
 
-Usage
-  oops                     Open the timeline (pick a turn, preview, undo)
-  oops <command> [flags]
+Usage:
+  oops undo [turn] [flags]
 
-Undo
-  undo [turn]              Undo the last turn, or a specific one
-  rewind <turn>            Go back to before a turn (undoes it and everything after)
-  redo                     Reverse the last undo, rewind or restore
-  restore <path>... --at <turn>
-                           Bring back files as they were before a turn
+Examples:
+  oops undo
+  oops undo 12
+  oops undo --file src/app.ts
 
-Inspect
-  list                     List recent turns
-  show [turn]              Show what a turn changed
-  diff [turn]              Show a turn's diff
+Flags:
+  -n, --dry-run            Preview without changing files
+  -f, --file stringArray   Only undo these paths
+      --force              Overwrite files you changed after the turn
+      --running            Close a still-running turn, then undo it
+  -y, --yes                Skip confirmation
 
-Setup
-  init                     Connect oops to the agents on this machine
-  run -- <command>         Protect any tool that has no hooks
-  snap                     Save a checkpoint now
-  doctor                   Check that everything works
-  gc                       Free up snapshot storage
-
-Flags
-  -h, --help     --version     --json     --color <auto|always|never>     -C <dir>
-
-Learn more: https://oops.sh/docs
+Global Flags:
+      --accessible     Line-oriented prompts instead of the full-screen timeline
+      --color string   Color: auto, always, or never (default "auto")
+      --debug          Technical details on stderr
+  -C, --dir string     Run as if started in this directory
+      --json           Machine-readable output
+  -q, --quiet          Errors only
 ```
 

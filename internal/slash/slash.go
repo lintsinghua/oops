@@ -9,11 +9,15 @@ import (
 
 	"github.com/lintsinghua/oops/internal/engine"
 	"github.com/lintsinghua/oops/internal/meta"
+	"github.com/lintsinghua/oops/internal/snapshot"
 	"github.com/lintsinghua/oops/internal/ui"
 )
 
 // Run executes a /oops invocation and returns text plus an exit code.
 func Run(e *engine.Engine, ws engine.Workspace, args []string, now time.Time) (string, int) {
+	if err := e.WaitPending(context.Background(), ws); err != nil {
+		return err.Error(), 1
+	}
 	if len(args) == 0 {
 		args = []string{"list"}
 	}
@@ -60,7 +64,7 @@ func Run(e *engine.Engine, ws engine.Workspace, args []string, now time.Time) (s
 			}
 			return err.Error(), 1
 		}
-		return "✓ oops · redid the last undo. /oops undo to flip it back", codeOf(res)
+		return "✓ oops · redid the last undo. /oops undo", codeOf(res)
 	case "diff":
 		seq := 0
 		if len(args) > 1 {
@@ -75,14 +79,12 @@ func Run(e *engine.Engine, ws engine.Workspace, args []string, now time.Time) (s
 			return err.Error(), 1
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "oops · diff #%d\n", t.Seq)
-		if len(changes) == 0 {
+		fmt.Fprintf(&b, "✓ oops · diff #%d\n", t.Seq)
+		files := snapshot.FileChanges(changes)
+		if len(files) == 0 {
 			b.WriteString("  no file changes\n")
 		}
-		for _, c := range changes {
-			if c.Pre != nil && c.Pre.Kind == 2 && (c.Post == nil || c.Post.Kind == 2) {
-				continue
-			}
+		for _, c := range files {
 			fmt.Fprintf(&b, "  %s  %s\n", c.Action, c.Path)
 		}
 		b.WriteString("  type oops in a terminal for the full timeline")
@@ -93,14 +95,18 @@ func Run(e *engine.Engine, ws engine.Workspace, args []string, now time.Time) (s
 			return err.Error(), 1
 		}
 		if len(turns) == 0 {
-			return "No snapshots here yet.\n  Not set up?  oops init        Any other tool?  oops run -- <command>", 0
+			return "✓ oops · no snapshots yet. Not set up? oops init. Any other tool? oops run -- <command>", 0
 		}
 		var b strings.Builder
-		b.WriteString("oops · last turns\n")
+		b.WriteString("✓ oops · last turns\n")
 		n := 0
+		var first meta.Turn
 		for _, t := range turns {
 			if t.Kind == "safety" {
 				continue
+			}
+			if n == 0 {
+				first = t
 			}
 			if n == 5 {
 				break
@@ -108,7 +114,11 @@ func Run(e *engine.Engine, ws engine.Workspace, args []string, now time.Time) (s
 			n++
 			fmt.Fprintf(&b, "  #%d  %s   %s    %s\n", t.Seq, ui.RelTime(now, t.StartedAt), ui.Quote(t.Prompt, 60), ui.Plural(t.Stats.Files, "file", "files"))
 		}
-		b.WriteString("  /oops undo  undo #" + fmt.Sprint(turns[0].Seq) + "   ·   /oops diff  preview   ·   type oops in a terminal for the full timeline")
+		verb := "undo"
+		if first.Status == "undone" {
+			verb = "redo"
+		}
+		fmt.Fprintf(&b, "  /oops %s  #%d   ·   /oops diff  preview   ·   type oops in a terminal for the full timeline", verb, first.Seq)
 		return b.String(), 0
 	}
 }
@@ -133,18 +143,14 @@ func parseSeq(s string) int {
 }
 
 func formatUndo(res engine.UndoResult) string {
-	rest, rem, rev := 0, 0, 0
-	for _, ef := range res.Effects {
-		switch ef.Op {
-		case "restore":
-			rest++
-		case "remove":
-			rem++
-		case "revert":
-			rev++
-		}
+	n := engine.CountFileEffects(res.Effects)
+	if n == 0 && res.Result == "partial" {
+		return "✓ oops · nothing was written"
 	}
-	return fmt.Sprintf("✓ oops · undid #%d — restored %d, removed %d, reverted %d.  /oops redo to bring it back", res.Turn.Seq, rest, rem, rev)
+	if n == 0 {
+		return fmt.Sprintf("✓ oops · undid #%d. /oops redo", res.Turn.Seq)
+	}
+	return fmt.Sprintf("✓ oops · undid #%d (%s). /oops redo", res.Turn.Seq, ui.Plural(n, "file", "files"))
 }
 
 func codeOf(res engine.UndoResult) int {

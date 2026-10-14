@@ -115,8 +115,13 @@ func newRoot(opt *options) *cobra.Command {
 	text := versionText()
 	root.Version = strings.TrimSuffix(text, "\n")
 	root.SetVersionTemplate("{{ .Version }}\n")
+	defaultHelp := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
-		fmt.Fprint(cmd.OutOrStdout(), helpText)
+		if cmd == root {
+			fmt.Fprint(cmd.OutOrStdout(), helpText)
+			return
+		}
+		defaultHelp(cmd, args)
 	})
 
 	root.AddCommand(

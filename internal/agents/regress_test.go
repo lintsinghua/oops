@@ -28,6 +28,85 @@ func TestVersionSkipsBanner(t *testing.T) {
 	if got := findVersion("warning: experimental build\n"); got != "" {
 		t.Fatalf("banner parsed as %q", got)
 	}
+	if got := findVersion("banner: starting 1.0 helper\n"); got != "" {
+		t.Fatalf("banner version %q", got)
+	}
+	if got := findVersion("Error: You must log in. See https://example.com/v1.2.3\n"); got != "" {
+		t.Fatalf("error line parsed as %q", got)
+	}
+	if got := findVersion("version 0.64.0\n"); got != "0.64.0" {
+		t.Fatalf("version prefix %q", got)
+	}
+}
+
+func TestGeminiVersionDoesNotRun(t *testing.T) {
+	prefix := t.TempDir()
+	binDir := filepath.Join(prefix, "bin")
+	pkgDir := filepath.Join(prefix, "lib", "node_modules", "@google", "gemini-cli")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(`{"name":"@google/gemini-cli","version":"0.64.0"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(prefix, "launched")
+	script := "#!/bin/sh\necho launched > '" + sentinel + "'\necho 'Error: You must log in.'\n"
+	path := filepath.Join(binDir, "gemini")
+	if runtime.GOOS == "windows" {
+		path += ".cmd"
+		script = "@echo off\r\necho launched > \"" + sentinel + "\"\r\necho Error: You must log in.\r\n"
+	}
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := versionOf(path); got != "0.64.0" {
+		t.Fatalf("version %q", got)
+	}
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Fatal("gemini was executed")
+	}
+
+	// A shim that only names the package via a quoted path, with no npm bin layout.
+	shimDir := t.TempDir()
+	index := filepath.Join(pkgDir, "index.js")
+	if err := os.WriteFile(index, []byte("#!/usr/bin/env node\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	shim := filepath.Join(shimDir, "gemini")
+	body := "#!/bin/sh\nexec node \"" + index + "\" \"$@\"\n"
+	if runtime.GOOS == "windows" {
+		shim += ".cmd"
+		body = "@echo off\r\nnode \"" + index + "\" %*\r\n"
+	}
+	if err := os.WriteFile(shim, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := versionOf(shim); got != "0.64.0" {
+		t.Fatalf("quoted path version %q", got)
+	}
+}
+
+func TestNonSemverVersionIsUnknown(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "claude")
+	body := "#!/bin/sh\necho 'Error: You must log in. See notes v1.2.3'\n"
+	if runtime.GOOS == "windows" {
+		path += ".cmd"
+		body = "@echo off\r\necho Error: You must log in. See notes v1.2.3\r\n"
+	}
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := versionOf(path); got != "" {
+		t.Fatalf("error text parsed as %q", got)
+	}
+	inst := Detect(Claude(), t.TempDir(), t.TempDir(), false, []string{dir})
+	if !inst.Found || inst.Version != "unknown" {
+		t.Fatalf("detect %+v", inst)
+	}
 }
 
 func TestRemoveOopsDropsNullEvents(t *testing.T) {

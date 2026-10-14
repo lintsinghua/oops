@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"os"
@@ -397,7 +398,9 @@ func Detect(a Agent, home, project string, projectLevel bool, pathExtra []string
 	inst.Found = ok
 	if ok {
 		inst.Version = versionOf(bin)
-		if inst.Version == "" {
+		if v, ok := normalizeSemver(inst.Version); ok {
+			inst.Version = v
+		} else {
 			inst.Version = "unknown"
 		}
 	}
@@ -435,11 +438,146 @@ func look(names, extra []string) (string, bool) {
 	return "", false
 }
 
+// versionOf reads a version without surprising side effects.
+// Gemini CLI rewrites ~/.gemini/settings.json on any launch, so its version
+// comes from the installed @google/gemini-cli package.json and the binary is
+// never executed. Claude Code, Codex, and Cursor do not rewrite the hook
+// config oops manages when asked for --version, so they may still be executed.
+// A value that is not itself a semver is discarded by Detect.
 func versionOf(bin string) string {
+	if isGeminiBin(bin) {
+		return geminiVersion(bin)
+	}
 	if v := findVersion(commandStdout(bin, "--version")); v != "" {
 		return v
 	}
 	return findVersion(commandStdout(bin, "version"))
+}
+
+func isGeminiBin(bin string) bool {
+	base := strings.ToLower(filepath.Base(bin))
+	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1"} {
+		base = strings.TrimSuffix(base, ext)
+	}
+	return base == "gemini"
+}
+
+func geminiVersion(bin string) string {
+	seen := map[string]bool{}
+	var roots []string
+	add := func(p string) {
+		p = strings.TrimSpace(p)
+		if p == "" || seen[p] {
+			return
+		}
+		seen[p] = true
+		roots = append(roots, p)
+	}
+	add(bin)
+	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
+		add(resolved)
+	}
+	if b, err := os.ReadFile(bin); err == nil && looksLikeScript(b) {
+		for _, p := range quotedPaths(string(b)) {
+			add(p)
+		}
+	}
+	for _, root := range roots {
+		if v := geminiVersionNear(root); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func looksLikeScript(b []byte) bool {
+	if len(b) == 0 || len(b) > 1<<16 || bytes.IndexByte(b, 0) >= 0 {
+		return false
+	}
+	return bytes.HasPrefix(b, []byte("#!")) || bytes.HasPrefix(b, []byte("@echo"))
+}
+
+func quotedPaths(body string) []string {
+	var out []string
+	for _, q := range []string{`"`, `'`} {
+		rest := body
+		for {
+			i := strings.Index(rest, q)
+			if i < 0 {
+				break
+			}
+			rest = rest[i+len(q):]
+			j := strings.Index(rest, q)
+			if j < 0 {
+				break
+			}
+			s := rest[:j]
+			rest = rest[j+len(q):]
+			if strings.Contains(s, "/") || strings.Contains(s, `\`) {
+				out = append(out, s)
+			}
+		}
+	}
+	return out
+}
+
+func geminiVersionNear(path string) string {
+	dir := path
+	if st, err := os.Stat(path); err == nil && !st.IsDir() {
+		dir = filepath.Dir(path)
+	}
+	rels := []string{
+		filepath.Join(dir, "..", "lib", "node_modules", "@google", "gemini-cli", "package.json"),
+		filepath.Join(dir, "..", "node_modules", "@google", "gemini-cli", "package.json"),
+		filepath.Join(dir, "node_modules", "@google", "gemini-cli", "package.json"),
+	}
+	for _, p := range rels {
+		if v := readGeminiPackage(p); v != "" {
+			return v
+		}
+	}
+	cur := dir
+	for i := 0; i < 6; i++ {
+		if v := readGeminiPackage(filepath.Join(cur, "package.json")); v != "" {
+			return v
+		}
+		if v := readGeminiPackage(filepath.Join(cur, "node_modules", "@google", "gemini-cli", "package.json")); v != "" {
+			return v
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	return ""
+}
+
+func readGeminiPackage(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var doc struct {
+		Name    string `json:"name"`
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(b, &doc) != nil || doc.Name != "@google/gemini-cli" {
+		return ""
+	}
+	v, ok := normalizeSemver(doc.Version)
+	if !ok {
+		return ""
+	}
+	return v
+}
+
+func normalizeSemver(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if s == "" || verRe.FindString(s) != s {
+		return "", false
+	}
+	return strings.TrimPrefix(s, "v"), true
 }
 
 func commandStdout(bin string, args ...string) string {
@@ -450,27 +588,35 @@ func commandStdout(bin string, args ...string) string {
 	return string(out)
 }
 
-// findVersion returns a version token from stdout. Banners and warnings are
-// ignored, including text that only appears on stderr.
+// findVersion returns a version from a clean stdout line: the line is a semver,
+// or it is "version <semver>", or it is a known program name plus a semver.
+// A semver buried in an error or a banner is ignored.
 func findVersion(out string) string {
-	var last string
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
 		if line == "" {
 			continue
 		}
-		m := verRe.FindString(line)
-		if m == "" {
-			continue
+		if v, ok := normalizeSemver(line); ok {
+			return v
 		}
-		token := strings.TrimPrefix(m, "v")
-		rest := strings.TrimSpace(strings.Replace(line, m, "", 1))
-		if rest == "" || strings.EqualFold(rest, "version") {
-			return token
+		fields := strings.Fields(line)
+		if len(fields) == 2 && (strings.EqualFold(fields[0], "version") || agentPrefix(fields[0])) {
+			if v, ok := normalizeSemver(fields[1]); ok {
+				return v
+			}
 		}
-		last = token
 	}
-	return last
+	return ""
+}
+
+func agentPrefix(s string) bool {
+	switch strings.ToLower(s) {
+	case "claude", "codex", "cursor", "cursor-agent", "agent", "oops", "gemini":
+		return true
+	default:
+		return false
+	}
 }
 
 // ClaudeCommandPath is the slash-command file Claude Code discovers.

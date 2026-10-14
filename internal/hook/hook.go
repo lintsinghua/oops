@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/lintsinghua/oops/internal/agents"
 	"github.com/lintsinghua/oops/internal/config"
 	"github.com/lintsinghua/oops/internal/engine"
+	"github.com/lintsinghua/oops/internal/meta"
 	"github.com/lintsinghua/oops/internal/platform"
 	"github.com/lintsinghua/oops/internal/slash"
 )
@@ -139,6 +141,9 @@ func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Wr
 	}
 	switch ev.Kind {
 	case "session":
+		if err = e.SealRunning(ctx, ws); err != nil {
+			return err
+		}
 		_, _, err = e.Capture(ctx, ws, engine.SnapOptions{Timeout: timeout})
 		return err
 	case "start":
@@ -149,8 +154,7 @@ func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Wr
 		return writeNotices(e, ws, ev, stdout)
 	case "end":
 		if qerr := e.QueueFinish(ws, ev.SessionID, false); qerr != nil {
-			_, err = e.CloseTurn(ctx, in, false)
-			if err != nil {
+			if _, err = e.CloseTurn(ctx, in, false); err != nil && !os.IsNotExist(err) && !isNotFound(err) {
 				return err
 			}
 			return writeNotices(e, ws, ev, stdout)
@@ -174,6 +178,10 @@ func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Wr
 	default:
 		return nil
 	}
+}
+
+func isNotFound(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || meta.IsNotFound(err)
 }
 
 func writeNotices(e *engine.Engine, ws engine.Workspace, ev agents.Event, stdout io.Writer) error {

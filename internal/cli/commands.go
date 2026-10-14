@@ -520,14 +520,12 @@ func cmdDiff(opt *options, seq int, paths []string, stat, names, reverse, noPage
 		return writeDiffJSON(opt.stdout, t, changes)
 	}
 	var buf bytes.Buffer
+	changes = snapshot.FileChanges(changes)
 	if len(changes) == 0 {
 		fmt.Fprintln(&buf, "No file changes.")
 		return pageOrPrint(opt, noPager, buf.Bytes())
 	}
 	for _, c := range changes {
-		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
-			continue
-		}
 		if names {
 			fmt.Fprintln(&buf, c.Path)
 			continue
@@ -613,7 +611,7 @@ func writeDiffJSON(w io.Writer, t meta.Turn, changes []snapshot.Change) error {
 		Turn          int   `json:"turn"`
 		Files         []row `json:"files"`
 	}{SchemaVersion: 1, Turn: t.Seq}
-	for _, c := range changes {
+	for _, c := range snapshot.FileChanges(changes) {
 		out.Files = append(out.Files, row{Path: c.Path, Action: c.Action, Insertions: c.Insertions, Deletions: c.Deletions, Binary: c.Binary})
 	}
 	if out.Files == nil {

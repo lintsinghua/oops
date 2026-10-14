@@ -102,6 +102,38 @@ func Truncate(s string, width int) string {
 	return runewidth.Truncate(s, width, "…")
 }
 
+// MiddleTruncate keeps the head and the tail of s, so a long path still shows its filename.
+func MiddleTruncate(s string, width int) string {
+	if width <= 0 || runewidth.StringWidth(s) <= width {
+		return s
+	}
+	if width <= 1 {
+		return "…"
+	}
+	tailW := (width - 1) / 2
+	if tailW < 1 {
+		tailW = 1
+	}
+	headW := width - 1 - tailW
+	if headW < 1 {
+		headW = 1
+		tailW = width - 2
+		if tailW < 1 {
+			tailW = 1
+		}
+	}
+	head := runewidth.Truncate(s, headW, "")
+	tail := s
+	for runewidth.StringWidth(tail) > tailW && len(tail) > 0 {
+		_, size := utf8.DecodeRuneInString(tail)
+		if size <= 0 {
+			break
+		}
+		tail = tail[size:]
+	}
+	return head + "…" + tail
+}
+
 // Pad pads s to width display columns.
 func Pad(s string, width int) string {
 	w := runewidth.StringWidth(s)

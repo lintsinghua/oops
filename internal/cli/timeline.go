@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strings"
@@ -39,7 +40,11 @@ func cmdTimeline(cmd *cobra.Command, opt *options) error {
 		header += "  " + strings.Join(names, " · ")
 	}
 	model := tui.New(rows, header, "", opt.colorOn(), ui.ASCIIMode())
-	prog := bubbletea.NewProgram(model, bubbletea.WithInput(opt.stdin), bubbletea.WithOutput(opt.stdout), bubbletea.WithMouseCellMotion())
+	model.Apply = func(a tui.Action) ([]tui.Row, string, error) {
+		return applyTimeline(s, a)
+	}
+	// Alt screen so quit leaves the terminal as it was. Undo and redo refresh in place.
+	prog := bubbletea.NewProgram(model, bubbletea.WithInput(opt.stdin), bubbletea.WithOutput(opt.stdout), bubbletea.WithMouseCellMotion(), bubbletea.WithAltScreen())
 	final, err := prog.Run()
 	if err != nil {
 		return err
@@ -150,10 +155,10 @@ func timelineRows(s *session) ([]tui.Row, error) {
 		rows = append(rows, row)
 		if i+1 < len(turns) {
 			gap, err := s.e.GapFiles(turns[i+1], turns[i])
-			if err == nil && len(gap) > 0 {
+			if n := snapshot.CountFileChanges(gap); err == nil && n > 0 {
 				rows = append(rows, tui.Row{
 					Gap: true, Agent: "you", When: ui.RelTime(now, turns[i].StartedAt),
-					Prompt: ui.Plural(len(gap), "file changed outside agents", "files changed outside agents"),
+					Prompt: ui.Plural(n, "file changed outside agents", "files changed outside agents"),
 				})
 			}
 		}
@@ -164,12 +169,12 @@ func timelineRows(s *session) ([]tui.Row, error) {
 func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (string, []string) {
 	var effects []engine.Effect
 	var diffs []string
-	for _, c := range changes {
-		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
-			continue
-		}
+	for _, c := range snapshot.FileChanges(changes) {
 		effects = append(effects, engine.Effect{Path: c.Path, Op: c.UndoAction})
-		oldB, newB := e.ReadBlob(c.Post), e.ReadBlob(c.Pre)
+		oldB, newB := []byte(nil), []byte(nil)
+		if e != nil {
+			oldB, newB = e.ReadBlob(c.Post), e.ReadBlob(c.Pre)
+		}
 		text, err := snapshot.Unified("now/"+c.Path, "undo/"+c.Path, string(oldB), string(newB), 3)
 		if err != nil || text == "" {
 			text = c.UndoAction + " " + c.Path
@@ -179,7 +184,11 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 		}
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "  Undo #%d would:\n\n", t.Seq)
+	if t.Status == "undone" {
+		fmt.Fprintf(&b, "  #%d is already undone.\n  Redo #%d would:\n\n", t.Seq, t.Seq)
+	} else {
+		fmt.Fprintf(&b, "  Undo #%d would:\n\n", t.Seq)
+	}
 	lines := groupLines(effects, false)
 	if len(lines) == 0 {
 		b.WriteString("    nothing to change\n")
@@ -191,4 +200,44 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 		b.WriteString("\n  ran: " + t.Prompt + "\n")
 	}
 	return b.String(), diffs
+}
+
+func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
+	ctx := context.Background()
+	var notice string
+	var actErr error
+	switch a.Kind {
+	case "undo":
+		res, err := s.e.Undo(ctx, engine.UndoRequest{Workspace: s.ws, Seq: a.Seq})
+		if err != nil {
+			actErr = err
+		} else {
+			notice = fmt.Sprintf("Undid #%d", res.Turn.Seq)
+		}
+	case "rewind":
+		res, err := s.e.Rewind(ctx, s.ws, a.Seq, false, false)
+		if err != nil {
+			actErr = err
+		} else {
+			n := a.Seq
+			if len(res.Seqs) > 0 {
+				n = res.Seqs[0]
+			}
+			notice = fmt.Sprintf("Rewound to before #%d", n)
+		}
+	case "redo":
+		if _, err := s.e.Redo(ctx, s.ws, false); err != nil {
+			actErr = err
+		} else {
+			notice = "Redid the last undo"
+		}
+	}
+	rows, err := timelineRows(s)
+	if err != nil {
+		return nil, "", err
+	}
+	if actErr != nil {
+		return rows, actErr.Error(), nil
+	}
+	return rows, notice, nil
 }

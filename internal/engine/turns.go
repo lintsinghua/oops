@@ -27,6 +27,11 @@ func (e *Engine) StartTurn(ctx context.Context, in TurnInput) (meta.Turn, error)
 	if err := e.WaitPending(ctx, in.Workspace); err != nil {
 		return meta.Turn{}, err
 	}
+	// The previous turn is over. Seal its post from the tree as it is now,
+	// before this turn's pre snapshot and before the agent edits again.
+	if err := e.SealRunning(ctx, in.Workspace); err != nil {
+		return meta.Turn{}, err
+	}
 	if in.Kind == "" {
 		in.Kind = "agent"
 	}
@@ -72,7 +77,7 @@ func (e *Engine) CloseTurn(ctx context.Context, in TurnInput, late bool) (meta.T
 	}
 	t, err := e.DB.RunningBySession(in.Workspace.ID, in.SessionID)
 	if err != nil {
-		if meta.IsNotFound(err) {
+		if meta.IsNotFound(err) && in.SessionID == "" {
 			running, rerr := e.DB.RunningTurns(in.Workspace.ID)
 			if rerr != nil {
 				return meta.Turn{}, rerr
@@ -128,6 +133,10 @@ func (e *Engine) finish(ctx context.Context, ws Workspace, t meta.Turn, late boo
 	if err != nil {
 		return t, err
 	}
+	cur, gerr := e.DB.GetTurn(ws.ID, t.Seq)
+	if gerr == nil && cur.Status != "running" && cur.PostSnap != "" {
+		return cur, nil
+	}
 	changes := snapshot.Diff(pre, res.Files)
 	changes = snapshot.AnnotateLines(changes, e.ReadBlob)
 	stats := statsFrom(changes)
@@ -155,13 +164,7 @@ func (e *Engine) finish(ctx context.Context, ws Workspace, t meta.Turn, late boo
 
 func statsFrom(changes []snapshot.Change) meta.Stats {
 	var s meta.Stats
-	for _, c := range changes {
-		if c.Pre != nil && c.Pre.Kind == snapshot.KindDir && (c.Post == nil || c.Post.Kind == snapshot.KindDir) {
-			continue
-		}
-		if c.Post != nil && c.Post.Kind == snapshot.KindDir && c.Pre == nil {
-			continue
-		}
+	for _, c := range snapshot.FileChanges(changes) {
 		s.Files++
 		switch c.Action {
 		case "added":
