@@ -58,10 +58,10 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | F20 AC1 | PASS | `TestE2ESubagentStopDoesNotSplit` | |
 | F20 AC2 | PASS | `TestNoticeOncePerReason` | Same reason is stored once |
 | F20 AC3 | PASS | `TestE2EPartialNoticeAndHookExit` | Claude gets one `oops ·` systemMessage. The next command does not repeat it |
-| §6.2 10k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 4 ms / 5 ms for the hook to return. That is not snapshot completion |
-| §6.2 100k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 5 ms / 6 ms for the hook to return |
-| §6.2 turn-start | PASS | `TestHookVisibleLatency` | Agent waits for the pre snapshot: 92 ms / 106 ms at 10k, 0.86 s / 0.92 s at 100k. Measured 2026-10-13, 4 vCPU |
-| §6.2 background completion | PASS | `TestHotCapturePercentiles` | In-process Capture after the hook has returned: 82 ms / 91 ms at 10k, 0.82 s / 3.5 s at 100k |
+| §6.2 10k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 103 ms / 107 ms. The post snapshot is stored before the hook returns. Measured 2026-10-14, 4 vCPU |
+| §6.2 100k turn-end | PASS | `TestHookVisibleLatency` | Agent waits 0.93 s / 1.00 s for the post snapshot to be stored |
+| §6.2 turn-start | PASS | `TestHookVisibleLatency` | Agent waits for the pre snapshot: 92 ms / 149 ms at 10k, 0.84 s / 0.90 s at 100k. Measured 2026-10-14, 4 vCPU |
+| §6.2 in-process capture | PASS | `TestHotCapturePercentiles` | Scan without process startup, measured 2026-10-13: 82 ms / 91 ms at 10k, 0.82 s / 3.5 s at 100k. The agent wait is the turn-end row |
 | §6.2 empty turn | PASS | `TestEmptyTurnAddsLittle` | Unchanged checkpoint adds at most 4 KB of objects |
 | §6.2 undo 1k | PASS | `TestUndoThousandFiles` | The Windows 2 s target is measured on Windows amd64. windows-11-arm: Known gap, to be optimized in v0.1.x (non-blocking). Atomic writes stay. Under 1 s on the Linux measurement machine. Hosted windows-11-arm, without `-race`, took 2.06 s (Go 1.26.9) and 3.93 s (Go 1.27.2) on 2026-10-13 |
 | §6.1 kill mid-undo | PASS | `TestKillDuringUndoRecovers` | The process is killed after the safety snapshot and pending journal are on disk and the apply has started. Each file is a complete version. The next command finishes the restore |
@@ -75,7 +75,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | BUG-3 Cursor workspace root | PASS | `TestCursorHookUsesWorkspaceRoot` | User-hook cwd `~/.cursor` is not the workspace. `workspace_roots` and `CURSOR_PROJECT_DIR` are. Several roots follow `CURSOR_PROJECT_DIR` |
 | BUG-4 init undo restores hooks | PASS | `TestInitUndoRestoresUserHooks` | Codex and Gemini configs that already had user hooks come back byte-for-byte. `*.oops-backup-*` files are removed. Event keys are not null |
 | BUG-5 agent version token | PASS | `TestVersionSkipsBanner`, `TestFindVersionOutputs` | The first semver token on stdout is the version, including `2.1.296 (Claude Code)` and `codex-cli 0.162.1`. Stderr is ignored. A line with no semver is not a version |
-| DEMO-1 post snapshot stays with its turn | PASS | `TestStopThenImmediateNewTurn`, `TestSlashUndoWaitsForPendingStop` | Stop exits immediately, or never queues, and the next session starts at once. The previous post is the tree at that boundary. A later scan does not rewrite it. `/oops undo` does not report the turn as still running |
+| DEMO-1 post snapshot stays with its turn | PASS | `TestStopThenImmediateNewTurn`, `TestSlashUndoWaitsForPendingStop` | A queued post snapshot is sealed when the next session starts. A later scan does not rewrite it. `/oops undo` does not report the turn as still running. The hook itself stores the post snapshot before it returns (DEMO-14) |
 | DEMO-2 undone turns are marked | PASS | `TestTimelineUndoneMarker`, `TestPreviewUndoneSaysRedo` | An undone turn shows `undone`. The preview says `Redo #N would re-apply:` with add/remove/modify counts, not the undo verbs |
 | DEMO-3 file counts ignore directories | PASS | `TestFileCountsIgnoreDirectories`, `TestFileChangesSkipDirectories` | Directories are not counted. List, show, slash, timeline preview, gap, and undo preview agree. One shared `snapshot.FileChanges` |
 | DEMO-4 redo hint suggests undo | PASS | `TestRedoHintSuggestsUndo` | After redo the hint is `oops undo` |
@@ -88,12 +88,18 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-11 non-TTY undo | PASS | `TestUndoNonTTYLatestAndPipedNo` | A non-terminal never prompts. `oops undo` applies the latest turn and does not treat piped `n` as an answer. An older turn is refused without `-y`. On a terminal, `echo n` cancels the prompt |
 | DEMO-12 undo after Stop | PASS | `TestUndoImmediatelyAfterStop`, `TestUndoCLIImmediatelyAfterStop` | Stop marks the turn ended before the hook returns. The post snapshot can still be queued. 200 immediate undos apply that turn and never say it is still running. A turn that has not received Stop exits 4 without waiting |
 | DEMO-13 end hooks are synchronous | PASS | `TestClaudeEndHooksAreSynchronous`, `TestInitRewritesAsyncClaudeEndHooks` | Claude `Stop`, `StopFailure`, and `SubagentStop` are installed without `async`. Codex, Gemini, and Cursor end hooks are synchronous too. Re-running `init` rewrites an older async entry. `init --undo` puts the previous file back byte for byte. `SessionStart` stays async |
+| DEMO-14 post snapshot finishes before Stop returns | PASS | `TestEditRightAfterStopIsKept`, `TestUndoKeepsFilesNewerThanStop`, `TestUndoForceOverwritesNewerMtime` | The real binary's turn-end hook returns only after the post snapshot is stored. An edit and a new file at that instant stay, exit 3, and the edit is reported kept. A file newer than Stop is kept even when its bytes match the post snapshot; a file that is not newer is undone. `--force` still overwrites. Runs on every OS. A timeout marks the snapshot partial |
+| DEMO-15 timeline stays on the acted-on turn | PASS | `TestTimelineStaysOnActedTurn` | After undo the cursor stays on that turn. The right pane is that turn's redo preview |
+| DEMO-16 preview keeps the file count | PASS | `TestTimelinePathCountStaysWhole`, `TestTimelinePromptUsesRemainingWidth` | At 120 columns the prompt uses the leftover width. A path is middle-truncated on its own, and `5 files` stays whole |
+| DEMO-17 toast reserves a row | PASS | `TestTimelineNoticeReservesRow` | `✓ Undid` occupies a row that is already reserved, so the list does not move down |
+| DEMO-18 init version column | PASS | `TestInitVersionColumnFits` | Column width follows the text, including `2026.10.12-d47ca18` |
+| DEMO-19 init undo removes empty dirs | PASS | `TestInitUndoRemovesEmptyDirs` | Directories oops created are removed when empty. A directory that still holds a user file stays |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 84 |
+| PASS | 90 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action
@@ -112,4 +118,4 @@ These are not FAIL. G1–G10 are v0.2 in the PRD and are not implemented. The ot
 
 ## Hook wait vs snapshot completion
 
-The 5 ms and 6 ms numbers are the time the agent waits for the turn-end hook process to return. The post snapshot then finishes in the background (0.82 s p50 / 3.5 s p95 at 100k files). The turn-start hook stays synchronous: it returns only after the pre snapshot is stored (0.86 s p50 / 0.92 s p95 at 100k files on this run).
+The turn-end hook returns only after the post snapshot is stored. On 2026-10-14 that wait was 103 ms p50 / 107 ms p95 at 10k files and 0.93 s / 1.00 s at 100k. The turn-start hook returns only after the pre snapshot is stored (92 ms / 149 ms at 10k, 0.84 s / 0.90 s at 100k on the same run). A timeout marks the snapshot partial. A file newer than the turn's Stop time is kept.

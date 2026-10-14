@@ -37,10 +37,11 @@ func TestHotCapturePercentiles(t *testing.T) {
 }
 
 // TestHookVisibleLatency times hook processes on an unchanged tree, after one
-// cold turn and after the previous background snapshot has finished.
+// cold turn and after any queued post snapshot has finished.
 //
-// turn-end writes a job and returns. That duration is how long the agent waits
-// for the hook to return. It is not the snapshot completion time.
+// turn-end stores the post snapshot before it returns. That duration is how
+// long the agent waits, including the snapshot. A timeout marks the snapshot
+// partial.
 // turn-start captures the pre snapshot before it returns, so that duration is
 // how long the agent waits for the pre snapshot to be stored.
 // p50/p95 use the same nearest-rank method as TestHotCapturePercentiles

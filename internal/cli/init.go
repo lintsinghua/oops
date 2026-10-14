@@ -125,6 +125,23 @@ func needsInstall(inst agents.Installation) bool {
 	return inst.Found && !inst.Invalid && (!inst.Connected || inst.Stale)
 }
 
+func agentColumnWidths(rows []foundAgent) (nameW, verW int) {
+	nameW, verW = 12, 10
+	for _, row := range rows {
+		if w := ui.DisplayWidth(row.agent.Name); w > nameW {
+			nameW = w
+		}
+		ver := "not found"
+		if row.inst.Found {
+			ver = row.inst.Version
+		}
+		if w := ui.DisplayWidth(ver); w > verW {
+			verW = w
+		}
+	}
+	return nameW, verW
+}
+
 func shortAgent(name string) string {
 	switch name {
 	case "Claude Code":
@@ -178,6 +195,7 @@ func cmdInitWrite(opt *options, rows []foundAgent, exe string, yes, project bool
 			return nil
 		}
 		fmt.Fprintf(opt.stdout, "  Found %s\n", ui.Plural(found, "agent", "agents"))
+		nameW, verW := agentColumnWidths(rows)
 		for _, row := range rows {
 			mark := sym.Off
 			ver := "not found"
@@ -187,7 +205,7 @@ func cmdInitWrite(opt *options, rows []foundAgent, exe string, yes, project bool
 				ver = row.inst.Version
 				path = "   " + displayHome(row.inst.ConfigPath, user)
 			}
-			line := fmt.Sprintf("    %s %s   %s%s", mark, ui.Pad(row.agent.Name, 12), ui.Pad(ver, 10), path)
+			line := fmt.Sprintf("    %s %s   %s%s", mark, ui.Pad(row.agent.Name, nameW), ui.Pad(ver, verW), path)
 			if row.inst.Found {
 				fmt.Fprintln(opt.stdout, st.Success.Render(line))
 			} else {
@@ -441,7 +459,33 @@ func removeClaudeCommand(user, project string, projectLevel bool) error {
 	if !strings.Contains(string(b), "<!-- oops -->") {
 		return nil
 	}
-	return os.Remove(path)
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	removeEmptyCommandDirs(filepath.Dir(path))
+	return nil
+}
+
+// removeEmptyCommandDirs drops commands/ and the agent config dir when oops
+// created them and they no longer hold anything.
+func removeEmptyCommandDirs(dir string) {
+	for i := 0; i < 2; i++ {
+		if dir == "" || dir == "." || dir == string(filepath.Separator) {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) > 0 {
+			return
+		}
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			return
+		}
+		dir = next
+	}
 }
 
 func writeInitJSON(opt *options, rows []foundAgent, chosen map[string]bool) error {

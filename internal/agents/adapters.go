@@ -278,6 +278,7 @@ func uninstallFile(path string) (Change, bool, error) {
 			return Change{}, false, err
 		}
 		removeBackups(backups)
+		removeEmptyDirs(filepath.Dir(path), 1)
 		return Change{Path: path, Before: prev}, true, nil
 	}
 	ch, err := WriteJSON(path, obj, prev)
@@ -324,6 +325,28 @@ func oldestBackup(paths []string) ([]byte, bool) {
 		return nil, false
 	}
 	return b, true
+}
+
+// removeEmptyDirs deletes dir, then its parents, while each one is empty.
+// levels caps the walk so a home directory is left in place.
+func removeEmptyDirs(dir string, levels int) {
+	for i := 0; i < levels; i++ {
+		if dir == "" || dir == "." || dir == string(filepath.Separator) {
+			return
+		}
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) > 0 {
+			return
+		}
+		if err := os.Remove(dir); err != nil {
+			return
+		}
+		next := filepath.Dir(dir)
+		if next == dir {
+			return
+		}
+		dir = next
+	}
 }
 
 func removeBackups(paths []string) {

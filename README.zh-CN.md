@@ -145,7 +145,7 @@ v0.2 计划支持：GitHub Copilot CLI、opencode、Qwen Code、Amp、Goose。[�
 ```
  Agent 一轮开始 ──► oops hook 要等快照 "pre" 落盘才返回
         … Agent 编辑文件、跑 sed、rm -rf、git clean …
- Agent 一轮结束 ──► oops hook 立刻返回 ──► 快照 "post" 在后台完成
+ Agent 一轮结束 ──► oops hook 要等快照 "post" 落盘才返回
 
  oops undo ──► 对这一轮改过的每个文件：
                  还是 Agent 留下的样子？      → 还原成 "pre" 版本
@@ -154,9 +154,9 @@ v0.2 计划支持：GitHub Copilot CLI、opencode、Qwen Code、Amp、Goose。[�
 
 - **按轮快照**。Agent 的 hooks 标出一轮的开始和结束，oops 在这两个时刻给工作区拍快照；两者之差就是这一轮做的全部改动，不管是哪个工具改的。
 - **增量、内容寻址**。借助 stat 缓存，只读取和哈希有变化的文件。内容去重、zstd 压缩、不可变——数据模型借鉴 git（blob、tree），但不使用 git 存储。
-- **你的改动是安全的**。撤销时对每个文件比较三个状态：轮前、轮后、现在。这一轮之后被你（或别的 Agent）改过的文件会被保留并列出，不会被覆盖。`--force` 可以强制覆盖，被覆盖的版本会先保存下来。
+- **你的改动是安全的**。撤销时对每个文件比较三个状态：轮前、轮后、现在。这一轮之后被你（或别的 Agent）改过的文件会被保留并列出，不会被覆盖。mtime 晚于这一轮 Stop 时刻的文件同样保留，即使 post 快照里已经有这些字节。`--force` 可以强制覆盖，被覆盖的版本会先保存下来。
 - **撤销也能撤销**。每次 undo、rewind、restore 之前都先拍一张安全快照，`oops redo` 一定能回到原样。
-- **不打扰**。hook 进程永远 exit 0，没有常驻进程。轮次开始的 hook 会等 pre 快照落盘才返回，后面的修改不会被当成撤销要恢复的原件。轮次结束的 hook 先在数据库里把这一轮标成已结束，记下任务后立刻返回，由脱离的进程写入 post 快照并做保留清理。`oops undo` 会等这张已排队的快照最多 5 秒，而不会把这一轮当成仍在运行。下一轮会等这张 post 快照（最多 30 秒，超时后由等待的进程自己写完），轮次边界不会错。如果上一轮还开着，pre hook 会先按当时的目录树把它收完，再存新的 pre 快照；Agent 进程在 Stop 之后立刻退出也一样。之后才跑完的后台扫描不会覆盖这张 post。后台进程如果中途退出，任务文件还在，下一条命令会把这一轮写完。hook 只在回答 `/oops` 时写 stdout；Claude Code 上，快照不完整或有文件大到没存下内容时，还会输出一条 `systemMessage`。其他 Agent 在下一次执行 `oops` 时看到同一条提示。同一个原因只提示一次。硬超时默认 10 秒，从这次扫描开始计时，超时只把快照标成 partial，不阻塞 Agent。
+- **不打扰**。hook 进程永远 exit 0，没有常驻进程。轮次开始的 hook 会等 pre 快照落盘才返回，后面的修改不会被当成撤销要恢复的原件。轮次结束的 hook 先把这一轮标成已结束，等 post 快照落盘后才返回。脱离的进程只做保留清理，不再负责 Agent 正在等的那张快照。`oops undo` 会等一张 Stop 已经排队、但扫描中途被打断的快照最多 5 秒，而不会把这一轮当成仍在运行。下一轮会等这张 post 快照（最多 30 秒，超时后由等待的进程自己写完），轮次边界不会错。如果上一轮还开着，pre hook 会先按当时的目录树把它收完，再存新的 pre 快照。之后才跑完的扫描不会覆盖这张 post。轮次结束的进程如果在扫描中途退出，任务文件还在，下一条命令会把这一轮写完。hook 只在回答 `/oops` 时写 stdout；Claude Code 上，快照不完整或有文件大到没存下内容时，还会输出一条 `systemMessage`。其他 Agent 在下一次执行 `oops` 时看到同一条提示。同一个原因只提示一次。硬超时默认 10 秒，从这次扫描开始计时，超时只把快照标成 partial，hook 照常返回。
 - **不碰你的仓库**。快照数据不会写进工作区。不写 `.git`，不建分支，不 stash。例外是 `oops init --project`：它会写入 Agent 自己的项目配置，例如 `.claude/settings.json`。快照在 `~/.local/share/oops`（Windows 为 `%LOCALAPPDATA%\oops`）。`OOPS_HOME` 可以改数据目录。
 - **收录范围**。没被 gitignore 的文件（含未跟踪文件），再加上即使被 gitignore 也受保护的文件（`.env`、`.env.*`、`.envrc`、`*.local`、`*.local.*`、`.dev.vars`、`local.settings.json`）。被 gitignore 的路径即使曾经 `git add -f` 也会跳过。`node_modules/`、`.venv/`、`target/` 等重目录自动跳过。`dist/` 和 `build/` 只在同时命中 gitignore 规则时跳过。可用 `.oopsignore`（gitignore 语法）调整。超过 50 MB 的文件只记录元数据不存内容。`oops doctor`、`oops show` 和下一条命令会说明它们未受保护。
 
@@ -185,34 +185,27 @@ oops 不取代 Agent 自带的检查点，而是补上它们覆盖不到的地�
 <details>
 <summary><strong>会拖慢 Agent 吗？</strong></summary>
 
-oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因之一就是快照给用户带来了问题，所以这是 oops 的第一条规矩：快照是增量的（只重读 size、mtime 或 mode 变化的文件），被排除的目录直接剪掉不遍历，每次快照有硬超时（默认 10 秒）——超时后快照标记为 partial，Agent 照常继续。轮次结束的 hook 在 post 快照入队后立刻返回。脱离的进程负责写入。轮次开始的 hook 要等 pre 快照落盘才返回。
+oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因之一就是快照给用户带来了问题，所以这是 oops 的第一条规矩：快照是增量的（只重读 size、mtime 或 mode 变化的文件），被排除的目录直接剪掉不遍历，每次快照有硬超时（默认 10 秒）——超时后快照标记为 partial，hook 返回。轮次结束的 hook 要等 post 快照落盘才返回。轮次开始的 hook 要等 pre 快照落盘才返回。
 
-2026-10-13 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run 'TestHotCapturePercentiles|TestHookVisibleLatency' ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。p50 是 21 个样本里排序后的第 11 个，p95 是第 20 个（nearest-rank）。机器：4 vCPU，Linux 6.12.94+ x86_64。
+2026-10-14 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。p50 是 21 个样本里排序后的第 11 个，p95 是第 20 个（nearest-rank）。机器：4 vCPU，Linux 6.12.94+ x86_64。
 
-**Agent 等待轮次结束 hook 返回的时间。** 这不是快照完成时间。`TestHookVisibleLatency` 编译 `./cmd/oops`，先走一轮冷启动，等后台任务清空，再计时 21 次 `oops hook claude turn-end` 从进程启动到退出。该进程只写入任务后退出。
+**Agent 等待轮次结束 hook 返回的时间。** post 快照在这个进程里完成。`TestHookVisibleLatency` 编译 `./cmd/oops`，先走一轮冷启动，等已排队的快照落盘，再计时 21 次 `oops hook claude turn-end` 从进程启动到退出。进程在快照落盘之后才退出。
 
 | 文件数 | Agent 等待 turn-end hook 返回，p50 | Agent 等待 turn-end hook 返回，p95 |
 |---:|---:|---:|
-| 10,000 | 4 ms | 5 ms |
-| 100,000 | 5 ms | 6 ms |
+| 10,000 | 103 ms | 107 ms |
+| 100,000 | 0.93 s | 1.00 s |
 
-**后台 post 快照的完成时间**，由进程内热 `Capture` 另测（`TestHotCapturePercentiles`：一次冷 Capture，然后 21 次未改动的 Capture，含 stat 遍历、缓存复用、tree 写入、SQLite 插入）。这是 turn-end hook 已经返回之后，快照本身还要花的时间：
-
-| 文件数 | 后台快照完成，p50 | 后台快照完成，p95 |
-|---:|---:|---:|
-| 10,000 | 82 ms | 91 ms |
-| 100,000 | 0.82 s | 3.5 s |
-
-**Agent 等待轮次开始 hook 返回的时间。** pre 快照在这个进程里完成，hook 要等快照落盘才返回。方法和上面的 turn-end 表相同，计时的是上一张后台快照已经结束后的 `oops hook claude turn-start`，所以这段等待是 pre 快照加上进程启动，不是上面的 5 ms / 6 ms。
+**Agent 等待轮次开始 hook 返回的时间。** pre 快照在这个进程里完成，hook 要等快照落盘才返回。方法和上面的 turn-end 表相同，计时的是上一张 post 快照已经结束后的 `oops hook claude turn-start`，所以这段等待是 pre 快照加上进程启动。
 
 | 文件数 | Agent 等待 turn-start hook 返回，p50 | Agent 等待 turn-start hook 返回，p95 |
 |---:|---:|---:|
-| 10,000 | 92 ms | 106 ms |
-| 100,000 | 0.86 s | 0.92 s |
+| 10,000 | 92 ms | 149 ms |
+| 100,000 | 0.84 s | 0.90 s |
 
-同一次测量里，10 万文件的进程内 Capture p95 是 3.5 s，turn-start hook 的 p95 是 0.92 s。两组都是同一台机器、同一天、21 个样本的 nearest-rank。如果上一张 post 快照还在写，turn-start hook 会先等它，上限 30 秒（`TestWaitPendingBounded`）。任务已经完成时，这段额外等待不到 50 ms。后台进程死掉不会丢掉这一轮：任务文件会留到后面的命令把 post 快照写完（`TestCrashedChildFinishesTurn`）。
+这一轮测量里，1 万个文件的 post 快照让 turn-end hook 的 p50 停在 103 ms。默认 10 秒超时会把快照标成 partial，hook 仍然返回。如果上一张 post 快照在扫描中途被杀掉，turn-start hook 会先等剩下的任务，上限 30 秒（`TestWaitPendingBounded`）。任务已经完成时，这段额外等待不到 50 ms。进程死掉不会丢掉这一轮：任务文件会留到后面的命令把 post 快照写完（`TestCrashedChildFinishesTurn`）。2026-10-13 的进程内热 Capture（不含进程启动）是 1 万文件 82 ms / 91 ms、10 万文件 0.82 s / 3.5 s（`TestHotCapturePercentiles`）。上面两张表是更晚一次测量，记的是 Agent 实际等待的时间。
 
-**冷启动和扫描时的内存。** `TestColdStart10k` 计时的是对 10,000 个文件、合计 300,000,000 字节做的第一次进程内 Capture。这台机器上是 0.69 s（PRD 在 Linux 上的上限是 3 s）。`TestScanRSS100k` 在扫描 100,000 个文件时采样 VmRSS，峰值 119.5 MiB，即 125,341,696 字节（PRD 上限是 150 MB）。同一台机器、同一天。这两个数各是一次采样，不是百分位。
+**冷启动和扫描时的内存。** `TestColdStart10k` 计时的是对 10,000 个文件、合计 300,000,000 字节做的第一次进程内 Capture。这台机器上是 0.69 s（PRD 在 Linux 上的上限是 3 s）。`TestScanRSS100k` 在扫描 100,000 个文件时采样 VmRSS，峰值 119.5 MiB，即 125,341,696 字节（PRD 上限是 150 MB）。测于 2026-10-13。这两个数各是一次采样，不是百分位。
 </details>
 
 <details>

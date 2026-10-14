@@ -159,11 +159,17 @@ func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Wr
 			}
 			return writeNotices(e, ws, ev, stdout)
 		}
-		if !spawnFinish(e.Home) {
-			if err = e.FinishPending(ctx, ws); err != nil {
-				return err
-			}
+		// The post snapshot is stored before this hook returns. A scan timeout
+		// marks that snapshot partial. The mark from QueueFinish is what a
+		// crash in the middle of the scan leaves for the next command.
+		if err = e.FinishPending(ctx, ws); err != nil {
+			return err
 		}
+		if err = e.WaitSnapshot(ctx, ws); err != nil {
+			return err
+		}
+		// Retention runs out of band. The snapshot itself is already stored.
+		spawnFinish(e.Home)
 		return writeNotices(e, ws, ev, stdout)
 	case "subagent":
 		e.Logf("subagent-stop agent=%s session=%s", ev.Agent, ev.SessionID)
