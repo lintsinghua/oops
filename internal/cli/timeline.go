@@ -141,13 +141,9 @@ func timelineRows(s *session) ([]tui.Row, error) {
 		if t.Kind == "safety" {
 			continue
 		}
-		status := t.Status
-		if len(t.Stats.Kept) > 0 {
-			status = strings.Join(t.Stats.Kept, ", ")
-		}
 		row := tui.Row{
 			Seq: t.Seq, Agent: t.Agent, When: ui.RelTime(now, t.StartedAt),
-			Prompt: t.Prompt, Files: t.Stats.Files, Status: status,
+			Prompt: t.Prompt, Files: t.Stats.Files, Status: t.Status,
 		}
 		changes, err := s.e.ChangesBetween(t)
 		if err == nil {
@@ -173,10 +169,11 @@ func timelineRows(s *session) ([]tui.Row, error) {
 func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (string, []string) {
 	var effects []engine.Effect
 	var diffs []string
-	undone := t.Status == "undone"
+	partial := t.Status == "kept" || len(t.Stats.Kept) > 0
+	redoView := partial || t.Status == "undone"
 	for _, c := range snapshot.FileChanges(changes) {
 		op := c.UndoAction
-		if undone {
+		if redoView {
 			op = reapplyOp(c.Action)
 		}
 		effects = append(effects, engine.Effect{Path: c.Path, Op: op})
@@ -193,10 +190,12 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 		}
 	}
 	var b strings.Builder
-	if undone {
+	if partial {
+		fmt.Fprintf(&b, "  #%d is undone (partial).\n", t.Seq)
+		b.WriteString(keptPreview(t.Stats.Kept))
+		fmt.Fprintf(&b, "  Redo #%d would re-apply:\n\n", t.Seq)
+	} else if redoView {
 		fmt.Fprintf(&b, "  #%d is already undone.\n  Redo #%d would re-apply:\n\n", t.Seq, t.Seq)
-	} else if len(t.Stats.Kept) > 0 {
-		fmt.Fprintf(&b, "  #%d kept %s.\n  Undo #%d would:\n\n", t.Seq, strings.Join(t.Stats.Kept, ", "), t.Seq)
 	} else {
 		fmt.Fprintf(&b, "  Undo #%d would:\n\n", t.Seq)
 	}
@@ -226,8 +225,24 @@ func reapplyOp(action string) string {
 }
 
 func undoNotice(res engine.UndoResult) string {
+	kept := keptEffectPaths(res.Effects)
+	if len(kept) == 0 {
+		return fmt.Sprintf("Undid #%d", res.Turn.Seq)
+	}
+	return fmt.Sprintf("Undid #%d, except %s", res.Turn.Seq, strings.Join(kept, ", "))
+}
+
+func redoNotice(res engine.UndoResult) string {
+	kept := keptEffectPaths(res.Effects)
+	if len(kept) == 0 {
+		return "Redid the last change"
+	}
+	return fmt.Sprintf("Redid the last change, except %s you changed afterwards: %s", ui.Plural(len(kept), "file", "files"), strings.Join(kept, ", "))
+}
+
+func keptEffectPaths(effects []engine.Effect) []string {
 	var kept []string
-	for _, ef := range res.Effects {
+	for _, ef := range effects {
 		if ef.Dir {
 			continue
 		}
@@ -235,10 +250,30 @@ func undoNotice(res engine.UndoResult) string {
 			kept = append(kept, ef.Path)
 		}
 	}
-	if len(kept) == 0 {
-		return fmt.Sprintf("Undid #%d", res.Turn.Seq)
+	return kept
+}
+
+// keptPreview lists files a partial undo left in place. The path stays in the
+// preview so the row can keep a short marker.
+func keptPreview(paths []string) string {
+	if len(paths) == 0 {
+		return ""
 	}
-	return fmt.Sprintf("Undid #%d, except %s", res.Turn.Seq, strings.Join(kept, ", "))
+	var b strings.Builder
+	fmt.Fprintf(&b, "  Kept %s\n", ui.Plural(len(paths), "file", "files"))
+	n := len(paths)
+	extra := 0
+	if n > previewPathCap {
+		extra = n - previewPathCap
+		n = previewPathCap
+	}
+	for _, p := range paths[:n] {
+		b.WriteString("    " + p + "\n")
+	}
+	if extra > 0 {
+		fmt.Fprintf(&b, "    +%d more\n", extra)
+	}
+	return b.String()
 }
 
 func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
@@ -265,10 +300,11 @@ func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
 			notice = fmt.Sprintf("Rewound to before #%d", n)
 		}
 	case "redo":
-		if _, err := s.e.Redo(ctx, s.ws, false); err != nil {
+		res, err := s.e.Redo(ctx, s.ws, false)
+		if err != nil {
 			actErr = err
 		} else {
-			notice = "Redid the last change"
+			notice = redoNotice(res)
 		}
 	}
 	rows, err := timelineRows(s)
