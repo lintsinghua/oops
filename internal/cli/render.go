@@ -155,6 +155,50 @@ func writtenCount(effects []engine.Effect) int {
 	return n
 }
 
+const previewPathCap = 8
+
+// previewEffectLines is the timeline preview. Each path is its own line so a
+// narrow column cannot glue two paths into one truncated name. The count stays
+// on the verb line. Paths past previewPathCap collapse to "+K more".
+func previewEffectLines(effects []engine.Effect) []string {
+	labels := map[string]string{
+		"restore": "restore", "remove": "remove", "revert": "revert",
+		"add": "add", "modify": "modify",
+		"kept": "kept", "unprotected": "kept",
+	}
+	buckets := map[string][]string{}
+	for _, ef := range effects {
+		if ef.Op == "skip" || ef.Dir {
+			continue
+		}
+		op := ef.Op
+		if op == "unprotected" {
+			op = "kept"
+		}
+		buckets[op] = append(buckets[op], ef.Path)
+	}
+	var lines []string
+	for _, op := range []string{"restore", "remove", "revert", "add", "modify", "kept"} {
+		paths := buckets[op]
+		if len(paths) == 0 {
+			continue
+		}
+		sort.Strings(paths)
+		lines = append(lines, fmt.Sprintf("%-8s %s", labels[op], ui.Plural(len(paths), "file", "files")))
+		n := len(paths)
+		if n > previewPathCap {
+			n = previewPathCap
+		}
+		for _, p := range paths[:n] {
+			lines = append(lines, "  "+p)
+		}
+		if extra := len(paths) - n; extra > 0 {
+			lines = append(lines, fmt.Sprintf("  +%d more", extra))
+		}
+	}
+	return lines
+}
+
 func groupLines(effects []engine.Effect, past bool) []string {
 	labels := map[string]string{
 		"restore": "restore", "remove": "remove", "revert": "revert",

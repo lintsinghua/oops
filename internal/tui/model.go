@@ -4,6 +4,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -405,25 +406,28 @@ func (m Model) body() string {
 		b.WriteString(m.styles.Bold.Render(" oops") + "  " + m.Header + "\n")
 		b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(8, m.Width))) + "\n")
 	}
-	// One reserved row, blank until a toast arrives, so the list does not jump.
-	notice := " "
-	if m.notice != "" {
-		if m.noticeOK {
-			notice = m.styles.Success.Render("  " + m.sym.OK + " " + m.notice)
-		} else {
-			notice = m.styles.Warning.Render("  " + m.sym.Warn + " " + m.notice)
-		}
-	}
-	b.WriteString(notice + "\n")
+	// One full-width row, blank until a toast arrives, so the list does not jump.
+	b.WriteString(m.noticeLine() + "\n")
 	vis := m.visible()
-	leftW, rightW, narrow := paneWidths(m.Width)
+	preview := ""
+	if row, ok := m.selected(); ok {
+		preview = row.Preview
+	}
+	leftW, rightW, stacked := paneWidths(m.Width)
+	markW := ui.DisplayWidth(" " + m.sym.Selected)
+	if markW < 2 {
+		markW = 2
+	}
 	var left, right strings.Builder
 	for i, r := range vis {
-		mark := "  "
+		mark := strings.Repeat(" ", markW)
 		if i == m.cursor && !r.Gap {
 			mark = " " + m.sym.Selected
+			if pad := markW - ui.DisplayWidth(mark); pad > 0 {
+				mark += strings.Repeat(" ", pad)
+			}
 		}
-		line := mark + m.line(r, leftW-2)
+		line := mark + m.line(r, listLineWidth(leftW, markW))
 		if i == m.cursor && !r.Gap {
 			line = m.styles.Select.Render(line)
 		} else if r.Gap || r.Status == "undone" {
@@ -431,11 +435,19 @@ func (m Model) body() string {
 		}
 		left.WriteString(line + "\n")
 	}
-	if row, ok := m.selected(); ok {
-		right.WriteString(fitPreview(row.Preview, rightW))
+	previewWidth := m.Width
+	if !stacked {
+		previewWidth = rightW
 	}
-	if narrow {
+	if strings.TrimSpace(preview) != "" {
+		right.WriteString(fitPreview(preview, previewWidth))
+	}
+	if stacked {
 		b.WriteString(left.String())
+		if right.Len() > 0 {
+			b.WriteString(right.String())
+			b.WriteByte('\n')
+		}
 	} else {
 		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left.String(), m.styles.Muted.Render(" │ "), right.String()))
 		b.WriteByte('\n')
@@ -488,36 +500,200 @@ func (m Model) line(r Row, width int) string {
 	return s
 }
 
-func paneWidths(width int) (left, right int, narrow bool) {
+// noticeLine is always one terminal row. A single space is not a row: some
+// terminals collapse it, and the list then jumps down when the toast appears.
+func (m Model) noticeLine() string {
+	width := m.Width
+	if width < 1 {
+		width = 1
+	}
+	if m.notice == "" {
+		return strings.Repeat(" ", width)
+	}
+	label := "  " + m.sym.Warn + " " + m.notice
+	style := m.styles.Warning
+	if m.noticeOK {
+		label = "  " + m.sym.OK + " " + m.notice
+		style = m.styles.Success
+	}
+	text := style.Render(label)
+	line := lipgloss.NewStyle().Width(width).MaxWidth(width).MaxHeight(1).Render(text)
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	if line == "" {
+		line = text
+	}
+	if pad := width - ui.DisplayWidth(line); pad > 0 && !m.styles.Enabled {
+		line += strings.Repeat(" ", pad)
+	}
+	return line
+}
+
+// listLineWidth is the width of the text after the selection mark.
+// The prompt column is whatever remains inside that width after the fixed
+// turn, agent, time, and file-count columns.
+func listLineWidth(left, mark int) int {
+	w := left - mark
+	if w < 10 {
+		return 10
+	}
+	return w
+}
+
+// paneWidths splits the terminal into the list and the preview.
+// The preview column is reserved only when the prompt still has room beside
+// it. On a 120-column window that column would leave the list short and the
+// row partly empty, so the list takes the full width and the preview sits
+// underneath. fixed columns are the mark, turn, agent, time, quotes, and file count.
+func paneWidths(width int) (left, right int, stacked bool) {
 	if width < 80 {
 		return width, 0, true
 	}
-	// The preview stays a compact column. The prompt takes the width that remains,
-	// including on a 120-column window, instead of a percentage that grows the preview.
+	const (
+		sep       = 3
+		listFixed = 2 + 27 + 7 + 2 // mark, prefix, " 1 file", quotes
+		minPrompt = 72
+	)
 	right = 34
 	if width >= 160 {
 		right = 42
 	}
-	left = width - right - 3
-	if left < 48 {
+	if width-right-sep-listFixed < minPrompt {
 		return width, 0, true
 	}
-	return left, right, false
+	return width - right - sep, right, false
 }
 
 func fitPreview(preview string, width int) string {
 	if width < 8 {
 		width = 8
 	}
-	lines := strings.Split(preview, "\n")
-	var b strings.Builder
-	for i, line := range lines {
-		if i > 0 {
-			b.WriteByte('\n')
-		}
-		b.WriteString(fitPreviewLine(line, width))
+	var out []string
+	for _, line := range strings.Split(preview, "\n") {
+		out = append(out, fitPreviewParts(line, width)...)
 	}
-	return b.String()
+	return strings.Join(out, "\n")
+}
+
+func fitPreviewParts(line string, width int) []string {
+	if strings.Contains(line, "ran:") {
+		return wrapRan(line, width)
+	}
+	if label, path, ok := splitPreviewPath(line); ok && strings.Contains(path, ", ") {
+		parts := []string{fitPreviewLine(strings.TrimRight(label, " "), width)}
+		for _, p := range strings.Split(path, ", ") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			parts = append(parts, fitPreviewLine("  "+p, width))
+		}
+		return parts
+	}
+	return []string{fitPreviewLine(line, width)}
+}
+
+// wrapRan breaks the prompt onto more lines. A middle ellipsis would hide the end.
+func wrapRan(line string, width int) []string {
+	if ui.DisplayWidth(line) <= width {
+		return []string{line}
+	}
+	i := strings.Index(line, "ran:")
+	prefix := line[:i+len("ran:")]
+	if !strings.HasSuffix(prefix, " ") {
+		prefix += " "
+	}
+	if width < ui.DisplayWidth(prefix)+1 {
+		width = ui.DisplayWidth(prefix) + 1
+	}
+	payload := strings.TrimSpace(line[i+len("ran:"):])
+	cont := strings.Repeat(" ", ui.DisplayWidth(prefix))
+	return wrapWords(prefix, cont, payload, width)
+}
+
+func wrapWords(prefix, cont, text string, width int) []string {
+	words := strings.Fields(text)
+	if len(words) == 0 {
+		return []string{strings.TrimRight(prefix, " ")}
+	}
+	var lines []string
+	gap := prefix
+	var b strings.Builder
+	b.WriteString(gap)
+	used := ui.DisplayWidth(gap)
+	started := false
+	flush := func() {
+		lines = append(lines, strings.TrimRight(b.String(), " "))
+		b.Reset()
+		gap = cont
+		b.WriteString(gap)
+		used = ui.DisplayWidth(gap)
+		started = false
+	}
+	for _, word := range words {
+		for word != "" {
+			room := width - used
+			extra := 0
+			if started {
+				extra = 1
+			}
+			if ui.DisplayWidth(word)+extra <= room {
+				if started {
+					b.WriteByte(' ')
+					used++
+				}
+				b.WriteString(word)
+				used += ui.DisplayWidth(word)
+				started = true
+				word = ""
+				continue
+			}
+			if started || room < 1 {
+				flush()
+				continue
+			}
+			part := takeCols(word, room)
+			if part == "" {
+				return lines
+			}
+			b.WriteString(part)
+			used += ui.DisplayWidth(part)
+			word = word[len(part):]
+			started = true
+			if word != "" {
+				flush()
+			}
+		}
+	}
+	if started {
+		lines = append(lines, strings.TrimRight(b.String(), " "))
+	}
+	return lines
+}
+
+func takeCols(s string, n int) string {
+	if n <= 0 || s == "" {
+		return ""
+	}
+	w := 0
+	end := 0
+	for i, r := range s {
+		rw := ui.DisplayWidth(string(r))
+		if w+rw > n {
+			break
+		}
+		w += rw
+		end = i + utf8.RuneLen(r)
+	}
+	if end == 0 {
+		_, size := utf8.DecodeRuneInString(s)
+		if size <= 0 {
+			return ""
+		}
+		return s[:size]
+	}
+	return s[:end]
 }
 
 // fitPreviewLine middle-truncates a path after the count label.

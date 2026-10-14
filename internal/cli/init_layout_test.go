@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -58,6 +59,74 @@ func TestInitUndoRemovesEmptyDirs(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(user, ".codex")); err != nil {
 		t.Fatalf(".codex with a user file was removed: %v", err)
+	}
+}
+
+func TestInitUndoClearsEmptyClaudeHome(t *testing.T) {
+	home := t.TempDir()
+	user := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	bin := t.TempDir()
+	writeFakeAgent(t, bin, "claude")
+	code, out := runOops(t, home, root, "", "--user-home", user, "init", "--path", bin, "--agent", "claude", "-y")
+	if code != 0 {
+		t.Fatalf("init: %d %s", code, out)
+	}
+	settings := filepath.Join(user, ".claude", "settings.json")
+	body, err := os.ReadFile(settings)
+	if err != nil || !bytes.Contains(body, []byte(`"matcher": "oops"`)) || !bytes.Contains(body, []byte("UserPromptExpansion")) {
+		t.Fatalf("settings: %s %v", body, err)
+	}
+	code, out = runOops(t, home, root, "", "--user-home", user, "init", "--undo", "--path", bin, "--agent", "claude", "-y")
+	if code != 0 {
+		t.Fatalf("undo: %d %s", code, out)
+	}
+	if _, err := os.Stat(settings); !os.IsNotExist(err) {
+		left, _ := os.ReadFile(settings)
+		t.Fatalf("settings remain: %v %s", err, left)
+	}
+	if _, err := os.Stat(filepath.Join(user, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf(".claude remains: %v", err)
+	}
+}
+
+func TestInitUndoRestoresClaudeSettings(t *testing.T) {
+	home := t.TempDir()
+	user := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	bin := t.TempDir()
+	writeFakeAgent(t, bin, "claude")
+	settings := filepath.Join(user, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	orig := []byte("{\n  \"theme\": \"dark\"\n}\n")
+	if err := os.WriteFile(settings, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	notes := filepath.Join(user, ".claude", "notes.txt")
+	if err := os.WriteFile(notes, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runOops(t, home, root, "", "--user-home", user, "init", "--path", bin, "--agent", "claude", "-y")
+	if code != 0 {
+		t.Fatalf("init: %d %s", code, out)
+	}
+	code, out = runOops(t, home, root, "", "--user-home", user, "init", "--undo", "--path", bin, "--agent", "claude", "-y")
+	if code != 0 {
+		t.Fatalf("undo: %d %s", code, out)
+	}
+	got, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(orig) {
+		t.Fatalf("settings:\n%s", got)
+	}
+	if _, err := os.Stat(notes); err != nil {
+		t.Fatal(err)
 	}
 }
 

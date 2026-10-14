@@ -318,19 +318,34 @@ func dropEmpty(v any) bool {
 	switch t := v.(type) {
 	case nil:
 		return true
+	case []any:
+		return len(t) == 0
 	case map[string]any:
 		if len(t) == 0 {
 			return true
 		}
-		if h, ok := t["hooks"]; ok {
-			if list, ok := h.([]any); ok && len(list) == 0 {
-				return true
-			}
-		}
-	case []any:
-		return len(t) == 0
+		// A matcher group with no commands, an empty hooks array, or an empty
+		// hooks object. User commands under "hooks" keep the group.
+		return emptyHookGroup(t)
+	default:
+		return false
 	}
-	return false
+}
+
+// emptyHookGroup reports a Claude-style group that would render as
+// {"matcher":"oops"} or {"hooks":[]} after its commands are gone.
+func emptyHookGroup(t map[string]any) bool {
+	for k := range t {
+		if k != "hooks" && k != "matcher" {
+			return false
+		}
+	}
+	h, ok := t["hooks"]
+	if !ok {
+		_, hasMatcher := t["matcher"]
+		return hasMatcher
+	}
+	return dropEmpty(h)
 }
 
 func isOopsCommand(m map[string]any) bool {
