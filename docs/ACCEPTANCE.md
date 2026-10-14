@@ -100,16 +100,19 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-23 side-by-side divider spans the pane | PASS | `TestTimelineDividerFullHeight` | At 170 columns the `│` divider is on every row of the taller pane, in one column. Path lines in the preview share one indent |
 | DEMO-24 undo, redo, undo on the same turn | PASS | `TestUndoRedoUndoSameTurn`, `TestUndoRedoUndoSameTurnExitsClean` | Three rounds of undo then redo on the same turn exit 0 and restore the turn's bytes, then the earlier bytes. A real edit after redo is kept, the other file from that turn is reverted, and the command exits 3 |
 | DEMO-25 edit during the post snapshot | PASS | `TestFileTouchedDuringPostSnapshotIsKept` | A file whose mtime is inside [Stop start, post snapshot done], and whose bytes match the post snapshot, is kept. The result is partial and the turn records that path |
-| DEMO-26 timeline names kept files | PASS | `TestUndoNoticeNamesKeptFile`, `TestKeptFileShowsInStatus` | A partial undo toast is `Undid #N, except README.md`. The status column shows that path |
+| DEMO-26 timeline names kept files | PASS | `TestUndoNoticeNamesKeptFile`, `TestKeptFileShowsInStatus` | A partial undo toast is `Undid #N, except` the path. The row marker is `partial` in its own column. The path is in the preview |
 | DEMO-27 redo does not say undo | PASS | `TestUndoRedoUndoSameTurnExitsClean`, `TestRedoHintSuggestsUndo` | `oops redo` does not print `Undid`. The hint stays `oops undo` |
 | DEMO-28 narrow footer keeps help and quit | PASS | `TestFooterKeepsHelpAndQuit` | At 80×24 the footer shows `? help` and `q quit` and drops the rewind hint |
 | DEMO-29 wide prompt uses the leftover width | PASS | `TestPromptUsesRemainingWidthAt175` | At 175 columns a 95-character prompt is shown in full beside the right-aligned file count |
+| DEMO-30 partial row marker stays in its column | PASS | `TestKeptFileShowsInStatus` | After a partial undo the row is `9 files` then `partial`, with a gap. The path is not concatenated onto the count |
+| DEMO-31 partial undo preview is the redo preview | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | The preview says the turn is undone (partial), lists the kept file, and shows `Redo #N would re-apply:` |
+| DEMO-32 partial redo toast names the file | PASS | `TestRedoNoticeNamesKeptFile`, `TestPartialRedoToastMatchesCLI` | The timeline toast is `! Redid the last change, except 1 file you changed afterwards` and names the file |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 100 |
+| PASS | 103 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action
@@ -128,4 +131,4 @@ These are not FAIL. G1–G10 are v0.2 in the PRD and are not implemented. The ot
 
 ## Hook wait vs snapshot completion
 
-The turn-end hook returns only after the post snapshot is stored. On 2026-10-14 the published wait is 180 ms p50 / 180 ms p95 at 10k files and 1.4 s / 1.4 s at 100k, the higher of `TestHookVisibleLatency` (112 ms / 127 ms and 1.00 s / 1.11 s) and a designer measurement (~180 ms and ~1.4 s). The turn-start hook returns only after the pre snapshot is stored. The published wait is 99 ms / 153 ms at 10k (this run) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s). Machine: 4 vCPU (Intel Xeon on KVM), 16 GB RAM, 256 GB virtio disk (ext4), Linux 6.12.94+. A timeout marks the snapshot partial. A file newer than the turn's Stop time is kept.
+The turn-end hook returns only after the post snapshot is stored. On 2026-10-14 the published wait is 180 ms p50 / 180 ms p95 at 10k files and 1.4 s / 1.4 s at 100k, the higher of `TestHookVisibleLatency` (112 ms / 127 ms and 1.00 s / 1.11 s) and a designer measurement (~180 ms and ~1.4 s). The turn-start hook returns only after the pre snapshot is stored. The published wait is 99 ms / 153 ms at 10k (this run) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s). Machine: 4 vCPU (Intel Xeon on KVM), 16 GB RAM, 256 GB virtio disk (ext4), Linux 6.12.94+. A timeout marks the snapshot partial. A file whose mtime falls inside the post-snapshot window is kept. Outside that window, a file is kept only when its content differs from the baseline.

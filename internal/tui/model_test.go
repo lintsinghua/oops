@@ -456,17 +456,66 @@ func TestPromptUsesRemainingWidthAt175(t *testing.T) {
 
 func TestKeptFileShowsInStatus(t *testing.T) {
 	rows := []Row{{
-		Seq: 2, Agent: "claude", When: "1 min ago", Prompt: "edit readme", Files: 1, Status: "README.md",
-		Preview: "  #2 kept README.md.\n",
+		Seq: 3, Agent: "claude", When: "1 min ago", Prompt: "edit readme", Files: 9, Status: "kept",
+		Preview: "  #3 is undone (partial).\n  Kept 1 file\n    pkg/m1.go\n  Redo #3 would re-apply:\n\n    add  9 files\n      pkg/m1.go\n",
 	}}
 	m := New(rows, "proj", "", false, true)
 	m.Width = 120
 	m.Height = 24
-	m.notice = "Undid #2, except README.md"
+	m.notice = "Undid #3, except pkg/m1.go"
 	m.noticeOK = false
 	view := m.View()
-	if !strings.Contains(view, "Undid #2, except README.md") || !strings.Contains(view, "README.md") {
-		t.Fatalf("toast or status:\n%s", view)
+	var row string
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "9 files") && strings.Contains(line, "partial") {
+			row = line
+			break
+		}
+	}
+	if row == "" || strings.Contains(row, "pkg/m1.go") || strings.Contains(row, "9 filespartial") || !strings.Contains(row, " partial") {
+		t.Fatalf("row %q\n%s", row, view)
+	}
+	if !strings.Contains(view, "pkg/m1.go") || !strings.Contains(view, "undone (partial)") || !strings.Contains(view, "Redo #3 would re-apply:") {
+		t.Fatalf("preview:\n%s", view)
+	}
+	if strings.Contains(view, "Undo #3 would") {
+		t.Fatalf("stale undo preview:\n%s", view)
+	}
+	if !strings.Contains(view, "! Undid #3, except pkg/m1.go") {
+		t.Fatalf("toast:\n%s", view)
+	}
+	var model tea.Model = m
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := model.(Model)
+	if got.pending != "redo" || !strings.Contains(got.View(), "Redo turn #3?") {
+		t.Fatalf("pending %q\n%s", got.pending, got.View())
+	}
+}
+
+func TestPartialRedoToastMatchesCLI(t *testing.T) {
+	rows := sampleRows()
+	notice := "Redid the last change, except 1 file you changed afterwards: pkg/m1.go"
+	m := New(rows, "proj", "", false, false)
+	m.Width = 160
+	m.Height = 24
+	m.Apply = func(a Action) ([]Row, string, error) {
+		if a.Kind != "redo" {
+			t.Fatalf("kind %s", a.Kind)
+		}
+		return rows, notice, nil
+	}
+	var model tea.Model = m
+	model, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'R'}})
+	if cmd == nil {
+		t.Fatal("expected apply")
+	}
+	model, _ = model.Update(cmd())
+	view := model.(Model).View()
+	if !strings.Contains(view, "! Redid the last change, except 1 file you changed afterwards") || !strings.Contains(view, "pkg/m1.go") {
+		t.Fatalf("toast:\n%s", view)
+	}
+	if strings.Contains(view, "✓") {
+		t.Fatalf("success glyph on a partial redo:\n%s", view)
 	}
 }
 

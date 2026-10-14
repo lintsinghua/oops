@@ -185,6 +185,43 @@ func TestPreviewUndoneSaysRedo(t *testing.T) {
 	}
 }
 
+func TestPreviewPartialUndoSaysRedo(t *testing.T) {
+	var changes []snapshot.Change
+	for i := 0; i < 9; i++ {
+		changes = append(changes, snapshot.Change{Path: "pkg/m" + string(rune('1'+i)) + ".go", Action: "added", UndoAction: "remove"})
+	}
+	text, _ := previewTurn(nil, meta.Turn{
+		Seq: 3, Status: "kept", Prompt: "edit",
+		Stats: meta.Stats{Kept: []string{"pkg/m1.go"}},
+	}, changes)
+	if !strings.Contains(text, "#3 is undone (partial).") || !strings.Contains(text, "Kept 1 file") || !strings.Contains(text, "\n    pkg/m1.go\n") {
+		t.Fatalf("kept list:\n%s", text)
+	}
+	if !strings.Contains(text, "Redo #3 would re-apply:") || strings.Contains(text, "Undo #3 would") || strings.Contains(text, "remove") {
+		t.Fatalf("preview still describes undo:\n%s", text)
+	}
+	if !strings.Contains(text, "add") || !strings.Contains(text, "9 files") {
+		t.Fatalf("redo lines:\n%s", text)
+	}
+}
+
+func TestRedoNoticeNamesKeptFile(t *testing.T) {
+	note := redoNotice(engine.UndoResult{
+		Effects: []engine.Effect{
+			{Path: "pkg/m1.go", Op: "kept"},
+			{Path: "a.go", Op: "restore"},
+		},
+	})
+	want := "Redid the last change, except 1 file you changed afterwards: pkg/m1.go"
+	if note != want {
+		t.Fatalf("notice %q", note)
+	}
+	clean := redoNotice(engine.UndoResult{Effects: []engine.Effect{{Path: "a.go", Op: "restore"}}})
+	if clean != "Redid the last change" || strings.Contains(clean, "Undid") {
+		t.Fatalf("clean %q", clean)
+	}
+}
+
 func TestSlashSuccessIsShort(t *testing.T) {
 	home, root := oneTurnWorkspace(t)
 	code, out := runOops(t, home, root, hookBody(root, "s", "/oops undo"), "hook", "claude", "turn-start")

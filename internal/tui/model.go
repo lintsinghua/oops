@@ -121,7 +121,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.noticeOK = false
 		} else {
 			m.notice = msg.notice
-			m.noticeOK = msg.notice != ""
+			// A partial undo or redo says "except" and uses the warning glyph.
+			m.noticeOK = msg.notice != "" && !strings.Contains(msg.notice, "except")
 		}
 		if msg.rows != nil {
 			m.Rows = msg.rows
@@ -224,7 +225,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.pending = "undo"
-			if row.Status == "undone" {
+			if row.Status == "undone" || row.Status == "kept" {
 				m.pending = "redo"
 			}
 			m.confirm = true
@@ -540,7 +541,7 @@ func (m Model) renderList(rows []Row, highlight, lineW, markW, paneW int) []stri
 		line := padDisplay(mark+m.line(r, listLineWidth(lineW, markW), statusWidth(rows)), paneW)
 		if i == highlight && !r.Gap {
 			line = m.styles.Select.Render(line)
-		} else if r.Gap || r.Status == "undone" {
+		} else if r.Gap || r.Status == "undone" || r.Status == "kept" {
 			line = m.styles.Muted.Render(line)
 		}
 		out = append(out, line)
@@ -551,20 +552,21 @@ func (m Model) renderList(rows []Row, highlight, lineW, markW, paneW int) []stri
 const (
 	fileColWidth   = 10
 	statusColWidth = 7
+	statusGap      = 1
 )
 
 func (m Model) line(r Row, width, statusW int) string {
 	if statusW < statusColWidth {
 		statusW = statusColWidth
 	}
-	tailW := fileColWidth + statusW
+	tailW := fileColWidth + statusGap + statusW
 	if r.Gap {
 		s := fmt.Sprintf(" %s    %-7s %-11s %s", m.sym.Gap, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11), r.Prompt)
 		room := width - tailW
 		if room < 1 {
 			return ui.Truncate(s, max(1, width))
 		}
-		return padDisplay(ui.Truncate(s, room), room) + rightCol("", fileColWidth) + rightCol("", statusW)
+		return padDisplay(ui.Truncate(s, room), room) + rightCol("", fileColWidth) + strings.Repeat(" ", statusGap) + rightCol("", statusW)
 	}
 	prefix := fmt.Sprintf(" #%-4d %-7s %-11s ", r.Seq, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11))
 	file := rightCol(ui.Plural(r.Files, "file", "files"), fileColWidth)
@@ -573,7 +575,7 @@ func (m Model) line(r Row, width, statusW int) string {
 		statusText = ui.Truncate(statusText, statusW)
 	}
 	status := rightCol(statusText, statusW)
-	tail := file + status
+	tail := file + strings.Repeat(" ", statusGap) + status
 	promptWidth := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(tail)
 	if promptWidth < 0 {
 		promptWidth = 0
@@ -709,7 +711,7 @@ func paneWidths(width int) (left, right int, stacked bool) {
 		minPreview = 28
 		maxPreview = 42
 	)
-	fixed := mark + prefix + fileColWidth + statusColWidth + quotes
+	fixed := mark + prefix + fileColWidth + statusGap + statusColWidth + quotes
 	if width-sep-minPreview-fixed < minPrompt {
 		return width, 0, true
 	}
@@ -745,23 +747,16 @@ func fitFooter(width int) string {
 	}
 }
 
-func statusWidth(rows []Row) int {
-	w := statusColWidth
-	for _, r := range rows {
-		if n := ui.DisplayWidth(rowStatus(r.Status)); n > w {
-			w = n
-		}
-	}
-	if w > 24 {
-		return 24
-	}
-	return w
+func statusWidth([]Row) int {
+	return statusColWidth
 }
 
 func rowStatus(status string) string {
 	switch status {
 	case "", "done", "partial":
 		return ""
+	case "kept":
+		return "partial"
 	default:
 		return status
 	}
@@ -1160,7 +1155,7 @@ func (m Model) card() string {
 	case m.pending == "rewind":
 		label = "Rewind"
 		title = fmt.Sprintf("Rewind to before #%d?", row.Seq)
-	case m.pending == "redo" || row.Status == "undone":
+	case m.pending == "redo" || row.Status == "undone" || row.Status == "kept":
 		label = "Redo"
 		title = fmt.Sprintf("Redo turn #%d?", row.Seq)
 	}
