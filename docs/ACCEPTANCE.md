@@ -113,7 +113,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-36 a kept file stays the user's | PASS | `TestKeptFileSurvivesUndoRedoUndo`, `TestKeptUserFileSurvivesSecondUndo` | Undo, redo, undo, redo on a turn that kept a user edit leaves that file in place and exits 3. `--force` overwrites it |
 | DEMO-37 timeline color follows the palette | PASS | `TestListRowColors`, `TestDiffColorsAddedAndRemoved` | Agent and time are Muted. `+` / `−` in the file count are Success / Danger. `undone` and `partial` are Warning. Diff additions are Success and removals are Danger. `NO_COLOR` and color off leave the text plain |
 | DEMO-38 the timeline fits the terminal | PASS | `TestConfirmCardKeepsTitle`, `TestClipPreviewShowsSingleHiddenFile`, `TestStackedPreviewBlanksBeforeRan` | At 30 rows the confirm card leaves the title on screen. A `+1 more` that would hide one file shows that file instead. Stacked layout has a blank line before `ran:` |
-| DEMO-39 redo wording and kept-file diff | PASS | `TestRedoDryRunUsesRestoreWording`, `TestKeptPreviewDiffIsDiskVersusApply` | `oops redo -n` and `redo --json` say re-apply or restored for a modified file, not revert. A kept file's timeline diff is the bytes on disk versus the bytes applying would write, and it says the file will not change |
+| DEMO-39 redo wording and kept-file diff | PASS | `TestRedoDryRunUsesRestoreWording`, `TestRedoAppliedSaysReapplied`, `TestRedoJSONSuggestsUndo`, `TestKeptPreviewDiffIsDiskVersusApply` | `oops redo -n` says re-apply. An applied redo says re-applied, not reverted. Applied `redo --json` suggests `oops undo`. A kept file's timeline diff is only "You changed this file after the turn — oops will leave it as is." |
 
 ## Counts
 

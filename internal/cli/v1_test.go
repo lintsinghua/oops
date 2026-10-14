@@ -188,6 +188,12 @@ func TestE2ERewindKeepsGap(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("v3"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// A one-second mtime can land inside the turn-end snapshot window and look
+	// like a user edit. Pin it before that window so rewind still sees the agent's bytes.
+	past := time.Now().Add(-2 * time.Second)
+	if err := os.Chtimes(filepath.Join(root, "a.txt"), past, past); err != nil {
+		t.Fatal(err)
+	}
 	_, _ = runOops(t, home, root, hookBody(root, "t2", ""), "hook", "claude", "turn-end")
 	code, out := runOops(t, home, root, "", "rewind", "1")
 	if code != 2 || !strings.Contains(out, "needs confirmation") {

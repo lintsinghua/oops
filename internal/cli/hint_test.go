@@ -151,9 +151,7 @@ func TestKeptPreviewDiffIsDiskVersusApply(t *testing.T) {
 	s := openSession(t, home, root)
 	undoDiff := diffText(t, timelineRow(t, s, 1), "src/a.txt")
 	s.e.Close()
-	if !strings.Contains(undoDiff, "user-line") || !strings.Contains(undoDiff, "will not change") {
-		t.Fatalf("undo diff:\n%s", undoDiff)
-	}
+	assertKeptNoteOnly(t, undoDiff)
 
 	if code, out := runOops(t, home, root, "", "undo", "-y"); code != 3 {
 		t.Fatalf("undo %d\n%s", code, out)
@@ -161,11 +159,87 @@ func TestKeptPreviewDiffIsDiskVersusApply(t *testing.T) {
 	s = openSession(t, home, root)
 	defer s.e.Close()
 	redoDiff := diffText(t, timelineRow(t, s, 1), "src/a.txt")
-	if !strings.Contains(redoDiff, "user-line") || !strings.Contains(redoDiff, "will not change") {
-		t.Fatalf("redo diff:\n%s", redoDiff)
-	}
+	assertKeptNoteOnly(t, redoDiff)
 	if got := mustReadFile(t, filepath.Join(root, "src", "a.txt")); got != user {
 		t.Fatalf("disk %q", got)
+	}
+}
+
+func TestRedoAppliedSaysReapplied(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	mustWriteFile(t, filepath.Join(root, "a.txt"), "one\n")
+	mustWriteFile(t, filepath.Join(root, "README.md"), "readme\n")
+	agentTurn(t, home, root, "t", "edit", func() {
+		mustWriteFile(t, filepath.Join(root, "a.txt"), "agent\n")
+		mustWriteFile(t, filepath.Join(root, "README.md"), "agent readme\n")
+		mustWriteFile(t, filepath.Join(root, "f1.txt"), "1\n")
+		mustWriteFile(t, filepath.Join(root, "f2.txt"), "2\n")
+		mustWriteFile(t, filepath.Join(root, "f3.txt"), "3\n")
+	})
+	mustWriteFile(t, filepath.Join(root, "a.txt"), "agent\nuser\n")
+	if code, out := runOops(t, home, root, "", "undo", "-y"); code != 3 {
+		t.Fatalf("undo %d\n%s", code, out)
+	}
+	code, out := runOops(t, home, root, "", "redo")
+	if code != 3 {
+		t.Fatalf("redo %d\n%s", code, out)
+	}
+	if strings.Contains(out, "reverted") || strings.Contains(out, "revert ") {
+		t.Fatalf("revert wording:\n%s", out)
+	}
+	if !strings.Contains(out, "re-applied") || !strings.Contains(out, "README.md") || !strings.Contains(out, "restored") {
+		t.Fatalf("applied wording:\n%s", out)
+	}
+	if got := mustReadFile(t, filepath.Join(root, "README.md")); got != "agent readme\n" {
+		t.Fatalf("README %q", got)
+	}
+}
+
+func TestRedoJSONSuggestsUndo(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	mustWriteFile(t, filepath.Join(root, "README.md"), "readme\n")
+	agentTurn(t, home, root, "t", "edit", func() {
+		mustWriteFile(t, filepath.Join(root, "README.md"), "agent readme\n")
+	})
+	if code, out := runOops(t, home, root, "", "undo", "-y"); code != 0 {
+		t.Fatalf("undo %d\n%s", code, out)
+	}
+	code, out := runOops(t, home, root, "", "redo", "-n", "--json")
+	if code != 0 || !strings.Contains(out, `"redo": "oops redo"`) {
+		t.Fatalf("dry json %d\n%s", code, out)
+	}
+	code, out = runOops(t, home, root, "", "redo", "--json")
+	if code != 0 {
+		t.Fatalf("redo json %d\n%s", code, out)
+	}
+	var doc struct {
+		Redo     string   `json:"redo"`
+		Restored []string `json:"restored"`
+		Reverted []string `json:"reverted"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if doc.Redo != "oops undo" {
+		t.Fatalf("next step %q\n%s", doc.Redo, out)
+	}
+	if len(doc.Reverted) != 0 || !contains(doc.Restored, "README.md") {
+		t.Fatalf("restored %#v reverted %#v", doc.Restored, doc.Reverted)
+	}
+}
+
+func assertKeptNoteOnly(t *testing.T, diff string) {
+	t.Helper()
+	const note = "You changed this file after the turn — oops will leave it as is."
+	if !strings.Contains(diff, note) {
+		t.Fatalf("note missing:\n%s", diff)
+	}
+	if strings.Contains(diff, "@@") || strings.Contains(diff, "\n-") || strings.Contains(diff, "\n+") || strings.Contains(diff, "user-line") {
+		t.Fatalf("kept file showed a hunk:\n%s", diff)
 	}
 }
 
@@ -288,8 +362,17 @@ func assertRedoJSONKeepsFile(t *testing.T, out, path string) {
 	if !found {
 		t.Fatalf("kept %#v", doc.Kept)
 	}
-	if strings.Contains(out, "oops undo") {
-		t.Fatalf("undo command in redo json:\n%s", out)
+	var next struct {
+		Redo string `json:"redo"`
+	}
+	if err := json.Unmarshal([]byte(out), &next); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
+	if next.Redo != "oops undo" {
+		t.Fatalf("next step %q\n%s", next.Redo, out)
+	}
+	if strings.Contains(out, "--file") || strings.Contains(out, "Undo it too") {
+		t.Fatalf("undo --file in redo json:\n%s", out)
 	}
 }
 

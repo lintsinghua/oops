@@ -154,7 +154,7 @@ func timelineRows(s *session) ([]tui.Row, error) {
 		if err == nil {
 			if cur != nil {
 				if plan, redo, perr := s.e.ActionPlan(context.Background(), s.ws, t, cur); perr == nil {
-					row.Preview, row.Diffs = previewFromPlan(s.e, t, changes, plan.Effects, redo)
+					row.Preview, row.Diffs = previewFromPlan(s.e, t, plan.Effects, redo)
 					row.Plan = planSummary(plan.Effects, redo)
 				}
 			}
@@ -197,13 +197,19 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 			op = "keep"
 		}
 		effects = append(effects, engine.Effect{Path: c.Path, Op: op})
-		oldB, newB := []byte(nil), []byte(nil)
-		if e != nil {
-			oldB, newB = e.ReadBlob(c.Post), e.ReadBlob(c.Pre)
-		}
-		text, err := snapshot.Unified("now/"+c.Path, "undo/"+c.Path, string(oldB), string(newB), 3)
-		if err != nil || text == "" {
-			text = op + " " + c.Path
+		var text string
+		if op == "keep" {
+			text = keptFileNote + "\n"
+		} else {
+			oldB, newB := []byte(nil), []byte(nil)
+			if e != nil {
+				oldB, newB = e.ReadBlob(c.Post), e.ReadBlob(c.Pre)
+			}
+			var err error
+			text, err = snapshot.Unified("now/"+c.Path, "undo/"+c.Path, string(oldB), string(newB), 3)
+			if err != nil || text == "" {
+				text = op + " " + c.Path
+			}
 		}
 		if len(diffs) < 20 {
 			diffs = append(diffs, fmt.Sprintf(" #%d · %s %s\n%s", t.Seq, op, c.Path, text))
@@ -234,9 +240,9 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 
 // previewFromPlan renders the action Undo or Redo would take. effects come from
 // the same planner those commands apply.
-func previewFromPlan(e *engine.Engine, t meta.Turn, changes []snapshot.Change, effects []engine.Effect, redo bool) (string, []string) {
+func previewFromPlan(e *engine.Engine, t meta.Turn, effects []engine.Effect, redo bool) (string, []string) {
 	shown := mapPreviewEffects(effects, redo)
-	diffs := planDiffs(e, t, changes, effects, redo)
+	diffs := planDiffs(e, t, effects, redo)
 	var b strings.Builder
 	switch {
 	case t.Status == "kept":
@@ -259,41 +265,30 @@ func previewFromPlan(e *engine.Engine, t meta.Turn, changes []snapshot.Change, e
 	return b.String(), diffs
 }
 
+// keptFileNote is the only text a kept file shows in an undo or redo diff.
+// The file on disk is already what applying would leave behind, so there is no hunk.
+const keptFileNote = "You changed this file after the turn — oops will leave it as is."
+
 // planDiffs is current disk versus the bytes applying the plan would write.
-// A kept file shows that same comparison and says it will not change.
-func planDiffs(e *engine.Engine, t meta.Turn, changes []snapshot.Change, effects []engine.Effect, redo bool) []string {
-	post := map[string]*snapshot.Meta{}
-	for _, c := range changes {
-		if c.Post != nil {
-			post[c.Path] = c.Post
-		}
-	}
+// A kept file has no hunk: after applying, the bytes stay what is on disk.
+func planDiffs(e *engine.Engine, t meta.Turn, effects []engine.Effect, redo bool) []string {
 	var diffs []string
 	for _, ef := range effects {
 		if ef.Dir {
 			continue
 		}
-		nowB := e.ReadBlob(ef.Before)
-		want := ef.Want
-		if redo && (ef.Op == "kept" || ef.Op == "unprotected") {
-			if p := post[ef.Path]; p != nil {
-				want = p
-			}
-		}
-		wantB := e.ReadBlob(want)
 		label := previewVerb(ef.Op, redo)
-		body, err := snapshot.Unified("now/"+ef.Path, "after/"+ef.Path, string(nowB), string(wantB), 3)
-		if err != nil {
-			body = ""
-		}
 		var b strings.Builder
 		fmt.Fprintf(&b, " #%d · %s %s\n", t.Seq, label, ef.Path)
 		if ef.Op == "kept" || ef.Op == "unprotected" {
-			b.WriteString("kept — will not change\n")
-		}
-		if body == "" {
-			b.WriteString(label + " " + ef.Path + "\n")
+			b.WriteString(keptFileNote + "\n")
 		} else {
+			nowB := e.ReadBlob(ef.Before)
+			wantB := e.ReadBlob(ef.Want)
+			body, err := snapshot.Unified("now/"+ef.Path, "after/"+ef.Path, string(nowB), string(wantB), 3)
+			if err != nil || body == "" {
+				body = label + " " + ef.Path + "\n"
+			}
 			b.WriteString(body)
 		}
 		if len(diffs) < 20 {

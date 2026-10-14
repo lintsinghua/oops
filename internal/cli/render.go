@@ -64,7 +64,7 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	}
 	fmt.Fprintln(w, st.Success.Render(title))
 	fmt.Fprintln(w)
-	for _, line := range groupLines(res.Effects, true, nil) {
+	for _, line := range groupLines(res.Effects, true, pastLabels(verb)) {
 		fmt.Fprintln(w, "  "+line)
 	}
 	if res.Result == "partial" {
@@ -82,6 +82,7 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
 	restored := pathsOf(res.Effects, "restore")
 	reverted := pathsOf(res.Effects, "revert")
 	commands := keptFileCommands(res)
+	next := "oops redo"
 	if verb == "redo" {
 		// A redo puts the agent's bytes back. That is a restore, not a revert,
 		// and the hint must not tell the user to undo the file they just kept.
@@ -89,6 +90,9 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
 		sort.Strings(restored)
 		reverted = []string{}
 		commands = []string{}
+		if !res.DryRun {
+			next = "oops undo"
+		}
 	}
 	out := map[string]any{
 		"schema_version": 1,
@@ -98,7 +102,7 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
 		"reverted":       reverted,
 		"kept":           keptOf(res.Effects),
 		"commands":       commands,
-		"redo":           "oops redo",
+		"redo":           next,
 		"dry_run":        res.DryRun,
 	}
 	if writtenCount(res.Effects) == 0 && res.Result == "partial" {
@@ -206,7 +210,7 @@ func renderNothingWritten(w io.Writer, opt *options, res engine.UndoResult, verb
 	st, sym := stylesOf(opt)
 	fmt.Fprintln(w, st.Success.Render(fmt.Sprintf("%s Nothing was written.", sym.Warn)))
 	fmt.Fprintln(w)
-	for _, line := range groupLines(res.Effects, true, nil) {
+	for _, line := range groupLines(res.Effects, true, pastLabels(verb)) {
 		fmt.Fprintln(w, "  "+line)
 	}
 	writeKeptHints(w, res, verb)
@@ -270,6 +274,15 @@ func previewEffectLines(effects []engine.Effect) []string {
 		}
 	}
 	return lines
+}
+
+// pastLabels is how an applied redo names a content change. Dry runs stay
+// in the present tense ("re-apply"); the applied line is "re-applied".
+func pastLabels(verb string) map[string]string {
+	if verb != "redo" {
+		return nil
+	}
+	return map[string]string{"revert": "re-applied"}
 }
 
 func groupLines(effects []engine.Effect, past bool, override map[string]string) []string {
