@@ -1,6 +1,6 @@
 # oops — brand guide
 
-> Ctrl+Z for coding agents. · Agent 闯祸，一键撤回。
+> Ctrl+Z for Agent: precise undo & redo in one step. · Agent 的 Ctrl+Z：一键精准撤销/重做
 
 oops is a safety net. The brand should feel like one: calm, precise, quiet until needed. The logo has one moment of character, the two o's glancing back. Everything around it stays quiet: pure black and white, lots of space, type doing the work. No mascots, no exclamation marks. The name and the eyes already say "oops"; everything else should say "it's fine".
 
@@ -81,7 +81,7 @@ All faces are open source (SIL OFL 1.1). Fredoka is used only in the logo; don't
 - The brand name does the joking; the copy doesn't. Short, active, present tense. Result first, details after (DESIGN.md §5.2).
 - No emoji, no banners, no ASCII art — in the CLI and in brand materials.
 - Be factual about other tools. Cite the docs or the issue; never "X is broken". oops works *alongside* built-in checkpoints.
-- Taglines: **"Ctrl+Z for coding agents."** (primary) · **"Agent 闯祸，一键撤回。"** (Chinese) · "Undo anything your agent did. Even `rm -rf`." (secondary).
+- Taglines: **"Ctrl+Z for Agent: precise undo & redo in one step."** (primary) · **"Agent 的 Ctrl+Z：一键精准撤销/重做"** (Chinese).
 
 ## 6. Usage rules
 
@@ -106,4 +106,4 @@ All faces are open source (SIL OFL 1.1). Fredoka is used only in the logo; don't
 
 ## 7. Social preview
 
-`social-preview.png` (1280 × 640) and `social-preview.svg` are the designer export: black and white, white wordmark, the tagline, one sentence, and a monochrome terminal card. Action words are set in bold instead of colour. Keep the 40 px safe margin GitHub crops to. Do not regenerate these files from an older script. The card text follows DESIGN.md §1.4 and is sample copy, not a recording of this build.
+`social-preview.png` (1280 × 640) and `social-preview.svg` are the designer export: black and white, white wordmark, the tagline **Ctrl+Z for Agent: precise undo & redo in one step.**, the line **Precise undo & redo in one step, right inside Claude Code, Codex, Gemini CLI and Cursor CLI.**, and a monochrome terminal card. Action words are set in bold instead of colour. Keep the 40 px safe margin GitHub crops to. Do not regenerate these files from an older script. The card text follows DESIGN.md §1.4 and is sample copy, not a recording of this build.
