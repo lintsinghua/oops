@@ -23,6 +23,7 @@ type Row struct {
 	Files   int
 	Status  string
 	Preview string
+	Plan    string
 	Diff    string
 	Diffs   []string
 }
@@ -1168,8 +1169,12 @@ func (m Model) card() string {
 		cancel = m.styles.Accent.Render(cancel)
 		undo = m.styles.Muted.Render(undo)
 	}
+	count := ui.Plural(row.Files, "file", "files")
+	if m.pending != "rewind" && row.Plan != "" {
+		count = row.Plan
+	}
 	inner := fmt.Sprintf("  %s\n  %s · %s\n\n  %s\n  Your changes after this turn are kept.\n\n        %s    %s  ",
-		title, ui.Quote(row.Prompt, 40), row.Agent, ui.Plural(row.Files, "file", "files"), undo, cancel)
+		title, ui.Quote(row.Prompt, 40), row.Agent, count, undo, cancel)
 	box := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(ui.Colors.Muted).Render(inner)
 	return box
 }

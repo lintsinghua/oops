@@ -136,6 +136,10 @@ func timelineRows(s *session) ([]tui.Row, error) {
 		return nil, err
 	}
 	now := time.Now()
+	var cur map[string]snapshot.Meta
+	if _, res, err := s.e.Capture(context.Background(), s.ws, engine.SnapOptions{}); err == nil {
+		cur = res.Files
+	}
 	var rows []tui.Row
 	for i, t := range turns {
 		if t.Kind == "safety" {
@@ -147,7 +151,15 @@ func timelineRows(s *session) ([]tui.Row, error) {
 		}
 		changes, err := s.e.ChangesBetween(t)
 		if err == nil {
-			row.Preview, row.Diffs = previewTurn(s.e, t, changes)
+			if cur != nil {
+				if plan, redo, perr := s.e.ActionPlan(context.Background(), s.ws, t, cur); perr == nil {
+					row.Preview, row.Diffs = previewFromPlan(s.e, t, changes, plan.Effects, redo)
+					row.Plan = planSummary(plan.Effects, redo)
+				}
+			}
+			if row.Preview == "" {
+				row.Preview, row.Diffs = previewTurn(s.e, t, changes)
+			}
 			if len(row.Diffs) > 0 {
 				row.Diff = row.Diffs[0]
 			}
@@ -210,6 +222,75 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 		b.WriteString("\n  ran: " + t.Prompt + "\n")
 	}
 	return b.String(), diffs
+}
+
+// previewFromPlan renders the action Undo or Redo would take. effects come from
+// the same planner those commands apply.
+func previewFromPlan(e *engine.Engine, t meta.Turn, changes []snapshot.Change, effects []engine.Effect, redo bool) (string, []string) {
+	shown := mapPreviewEffects(effects, redo)
+	_, diffs := previewTurn(e, t, changes)
+	var b strings.Builder
+	switch {
+	case t.Status == "kept":
+		fmt.Fprintf(&b, "  #%d is undone (partial).\n  Redo #%d would re-apply:\n\n", t.Seq, t.Seq)
+	case redo:
+		fmt.Fprintf(&b, "  #%d is already undone.\n  Redo #%d would re-apply:\n\n", t.Seq, t.Seq)
+	default:
+		fmt.Fprintf(&b, "  Undo #%d would:\n\n", t.Seq)
+	}
+	lines := previewEffectLines(shown)
+	if len(lines) == 0 {
+		b.WriteString("    nothing to change\n")
+	}
+	for _, line := range lines {
+		b.WriteString("    " + line + "\n")
+	}
+	if t.Prompt != "" {
+		b.WriteString("\n  ran: " + t.Prompt + "\n")
+	}
+	return b.String(), diffs
+}
+
+func mapPreviewEffects(effects []engine.Effect, redo bool) []engine.Effect {
+	out := make([]engine.Effect, 0, len(effects))
+	for _, ef := range effects {
+		ef.Op = previewVerb(ef.Op, redo)
+		out = append(out, ef)
+	}
+	return out
+}
+
+func previewVerb(op string, redo bool) string {
+	switch op {
+	case "kept", "unprotected":
+		return "keep"
+	}
+	if !redo {
+		return op
+	}
+	switch op {
+	case "restore":
+		return "add"
+	case "revert":
+		return "modify"
+	default:
+		return op
+	}
+}
+
+// planSummary is the one-line form of the preview counts.
+func planSummary(effects []engine.Effect, redo bool) string {
+	var parts []string
+	for _, line := range previewEffectLines(mapPreviewEffects(effects, redo)) {
+		if strings.HasPrefix(line, "  ") {
+			continue
+		}
+		parts = append(parts, strings.Join(strings.Fields(line), " "))
+	}
+	if len(parts) == 0 {
+		return "nothing to change"
+	}
+	return strings.Join(parts, ", ")
 }
 
 // reapplyOp is what redo does to put a turn's edit back.

@@ -166,7 +166,7 @@ func previewEffectLines(effects []engine.Effect) []string {
 	labels := map[string]string{
 		"restore": "restore", "remove": "remove", "revert": "revert",
 		"add": "add", "modify": "modify",
-		"kept": "kept", "unprotected": "kept",
+		"keep": "keep", "kept": "keep", "unprotected": "keep",
 	}
 	buckets := map[string][]string{}
 	for _, ef := range effects {
@@ -174,19 +174,23 @@ func previewEffectLines(effects []engine.Effect) []string {
 			continue
 		}
 		op := ef.Op
-		if op == "unprotected" {
-			op = "kept"
+		if op == "unprotected" || op == "kept" {
+			op = "keep"
 		}
 		buckets[op] = append(buckets[op], ef.Path)
 	}
 	var lines []string
-	for _, op := range []string{"restore", "remove", "revert", "add", "modify", "kept"} {
+	for _, op := range []string{"restore", "remove", "revert", "add", "modify", "keep"} {
 		paths := buckets[op]
 		if len(paths) == 0 {
 			continue
 		}
 		sort.Strings(paths)
-		lines = append(lines, fmt.Sprintf("%-8s %s", labels[op], ui.Plural(len(paths), "file", "files")))
+		line := fmt.Sprintf("%-8s %s", labels[op], ui.Plural(len(paths), "file", "files"))
+		if op == "keep" {
+			line += " (yours)"
+		}
+		lines = append(lines, line)
 		n := len(paths)
 		if n > previewPathCap {
 			n = previewPathCap

@@ -2,10 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 	"github.com/lintsinghua/oops/internal/engine"
 	"github.com/lintsinghua/oops/internal/meta"
 	"github.com/lintsinghua/oops/internal/snapshot"
+	"github.com/lintsinghua/oops/internal/tui"
 )
 
 func TestFileCountsIgnoreDirectories(t *testing.T) {
@@ -186,23 +190,111 @@ func TestPreviewUndoneSaysRedo(t *testing.T) {
 }
 
 func TestPreviewPartialUndoSaysRedo(t *testing.T) {
-	var changes []snapshot.Change
-	for i := 0; i < 9; i++ {
-		changes = append(changes, snapshot.Change{Path: "pkg/m" + string(rune('1'+i)) + ".go", Action: "added", UndoAction: "remove"})
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	mustWriteFile(t, filepath.Join(root, "base.txt"), "base")
+	if err := os.MkdirAll(filepath.Join(root, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	text, _ := previewTurn(nil, meta.Turn{
-		Seq: 3, Status: "kept", Prompt: "edit",
-		Stats: meta.Stats{Kept: []string{"pkg/m1.go"}},
-	}, changes)
-	if !strings.Contains(text, "#3 is undone (partial).") || !strings.Contains(text, "Kept 1 file") || !strings.Contains(text, "\n    pkg/m1.go\n") {
-		t.Fatalf("kept list:\n%s", text)
+	agentTurn(t, home, root, "t1", "add nine", func() {
+		for i := 1; i <= 9; i++ {
+			mustWriteFile(t, filepath.Join(root, "pkg", "m"+strconv.Itoa(i)+".go"), "pkg")
+		}
+	})
+	mustWriteFile(t, filepath.Join(root, "pkg", "m1.go"), "user edit")
+
+	s := openSession(t, home, root)
+	defer s.e.Close()
+	ctx := context.Background()
+	undoRow := timelineRow(t, s, 1)
+	dryUndo, err := s.e.Undo(ctx, engine.UndoRequest{Workspace: s.ws, Seq: 1, DryRun: true})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(text, "Redo #3 would re-apply:") || strings.Contains(text, "Undo #3 would") || strings.Contains(text, "remove") {
-		t.Fatalf("preview still describes undo:\n%s", text)
+	if undoRow.Plan != planSummary(dryUndo.Effects, false) {
+		t.Fatalf("undo preview %q\ndry %q\n%s", undoRow.Plan, planSummary(dryUndo.Effects, false), undoRow.Preview)
 	}
-	if !strings.Contains(text, "add") || !strings.Contains(text, "9 files") {
-		t.Fatalf("redo lines:\n%s", text)
+	undone, err := s.e.Undo(ctx, engine.UndoRequest{Workspace: s.ws, Seq: 1})
+	if err != nil {
+		t.Fatal(err)
 	}
+	if undoRow.Plan != planSummary(undone.Effects, false) {
+		t.Fatalf("undo preview %q\napplied %q", undoRow.Plan, planSummary(undone.Effects, false))
+	}
+	if w, k := countPlanned(undone.Effects); w != 8 || k != 1 {
+		t.Fatalf("undo applied write %d kept %d\n%s", w, k, undoRow.Preview)
+	}
+
+	redoRow := timelineRow(t, s, 1)
+	if !strings.Contains(redoRow.Preview, "undone (partial)") || !strings.Contains(redoRow.Preview, "Redo #1 would re-apply:") {
+		t.Fatalf("preview:\n%s", redoRow.Preview)
+	}
+	if strings.Contains(redoRow.Preview, "Undo #1 would") || strings.Contains(redoRow.Preview, "9 files") {
+		t.Fatalf("preview counts the kept file:\n%s", redoRow.Preview)
+	}
+	dryRedo, err := s.e.Redo(ctx, s.ws, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redoRow.Plan != planSummary(dryRedo.Effects, true) {
+		t.Fatalf("redo preview %q\ndry %q\n%s", redoRow.Plan, planSummary(dryRedo.Effects, true), redoRow.Preview)
+	}
+	redone, err := s.e.Redo(ctx, s.ws, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if redoRow.Plan != planSummary(redone.Effects, true) {
+		t.Fatalf("redo preview %q\napplied %q", redoRow.Plan, planSummary(redone.Effects, true))
+	}
+	if w, k := countPlanned(redone.Effects); w != 8 || k != 1 {
+		t.Fatalf("redo applied write %d kept %d\nplan %q\n%s", w, k, redoRow.Plan, redoRow.Preview)
+	}
+	if redoRow.Plan != "add 8 files, keep 1 file (yours)" {
+		t.Fatalf("plan %q", redoRow.Plan)
+	}
+}
+
+func timelineRow(t *testing.T, s *session, seq int) tui.Row {
+	t.Helper()
+	rows, err := timelineRows(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.Seq == seq {
+			return row
+		}
+	}
+	t.Fatalf("turn %d missing", seq)
+	return tui.Row{}
+}
+
+func openSession(t *testing.T, home, root string) *session {
+	t.Helper()
+	s, err := begin(&options{
+		home: home, dir: root, color: "never", quiet: true,
+		stdin: strings.NewReader(""), stdout: io.Discard, stderr: io.Discard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func countPlanned(effects []engine.Effect) (write, kept int) {
+	for _, ef := range effects {
+		if ef.Dir || ef.Op == "skip" {
+			continue
+		}
+		switch ef.Op {
+		case "kept", "unprotected":
+			kept++
+		case "restore", "remove", "revert":
+			write++
+		}
+	}
+	return write, kept
 }
 
 func TestRedoNoticeNamesKeptFile(t *testing.T) {

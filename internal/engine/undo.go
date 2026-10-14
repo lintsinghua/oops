@@ -84,8 +84,7 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 	if err != nil {
 		return UndoResult{}, err
 	}
-	changes := snapshot.Diff(pre, post)
-	paths := changePaths(changes)
+	paths := changePaths(snapshot.Diff(pre, post))
 	if len(req.Files) > 0 {
 		matched, missing := filterPaths(paths, req.Files)
 		if len(matched) == 0 {
@@ -97,11 +96,9 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 	if err != nil {
 		return UndoResult{}, err
 	}
-	own, _ := e.loadOwnWrites(req.Workspace)
-	windows := []snapWindow{{Start: t.EndedAt, Done: t.Stats.SnapDone}}
-	items := restore.Plan(paths, withBaseline(post, own, t.EndedAt), pre, curRes.Files, req.Force)
-	if !req.Force {
-		preserveAfterStop(items, windows, post, curRes.Files, own)
+	items, err := e.planUndoItems(req.Workspace, t, curRes.Files, paths, req.Force)
+	if err != nil {
+		return UndoResult{}, err
 	}
 	res := UndoResult{Turn: t, Result: resultOf(items), DryRun: req.DryRun, Seqs: []int{t.Seq}}
 	res.Effects = effects(items)
@@ -350,21 +347,7 @@ func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, 
 	if err != nil {
 		return UndoResult{}, err
 	}
-	var items []restore.Item
-	for _, ef := range detail.Items {
-		now := lookup(curRes.Files, ef.Path)
-		if !snapshot.SameState(now, ef.After) && !snapshot.SameState(now, ef.Want) {
-			items = append(items, restore.Item{Path: ef.Path, Op: "kept", Reason: "changed_after_turn", Before: now, Want: ef.Before})
-			continue
-		}
-		opName := "revert"
-		if ef.Before == nil {
-			opName = "remove"
-		} else if now == nil {
-			opName = "restore"
-		}
-		items = append(items, restore.Item{Path: ef.Path, Op: opName, Before: now, Want: ef.Before, After: ef.Before})
-	}
+	items := planRedoItems(detail.Items, curRes.Files)
 	res := UndoResult{Result: resultOf(items), Effects: effects(items), Seqs: op.Targets, DryRun: dry}
 	e.attachTurn(ws, &res)
 	if dry || !hasWritable(items) {
@@ -384,6 +367,102 @@ func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, 
 		}
 	}
 	return res, nil
+}
+
+// planUndoItems is the plan Undo applies. paths limits the plan; nil plans every change in the turn.
+func (e *Engine) planUndoItems(ws Workspace, t meta.Turn, cur map[string]snapshot.Meta, paths []string, force bool) ([]restore.Item, error) {
+	pre, _, err := e.Files(t.PreSnap)
+	if err != nil {
+		return nil, err
+	}
+	post, _, err := e.Files(t.PostSnap)
+	if err != nil {
+		return nil, err
+	}
+	if paths == nil {
+		paths = changePaths(snapshot.Diff(pre, post))
+	}
+	own, _ := e.loadOwnWrites(ws)
+	windows := []snapWindow{{Start: t.EndedAt, Done: t.Stats.SnapDone}}
+	items := restore.Plan(paths, withBaseline(post, own, t.EndedAt), pre, cur, force)
+	if !force {
+		preserveAfterStop(items, windows, post, cur, own)
+	}
+	return items, nil
+}
+
+// planRedoItems is the plan Redo applies to a recorded undo.
+func planRedoItems(recorded []restore.Item, cur map[string]snapshot.Meta) []restore.Item {
+	var items []restore.Item
+	for _, ef := range recorded {
+		now := lookup(cur, ef.Path)
+		if !snapshot.SameState(now, ef.After) && !snapshot.SameState(now, ef.Want) {
+			items = append(items, restore.Item{Path: ef.Path, Op: "kept", Reason: "changed_after_turn", Before: now, Want: ef.Before})
+			continue
+		}
+		opName := "revert"
+		if ef.Before == nil {
+			opName = "remove"
+		} else if now == nil {
+			opName = "restore"
+		}
+		items = append(items, restore.Item{Path: ef.Path, Op: opName, Before: now, Want: ef.Before, After: ef.Before})
+	}
+	return items
+}
+
+// ActionPlan is what the timeline would do to this turn. A finished turn uses
+// the undo plan. An undone or partial turn uses the redo plan. Both are the
+// planners Undo and Redo apply.
+func (e *Engine) ActionPlan(ctx context.Context, ws Workspace, t meta.Turn, cur map[string]snapshot.Meta) (UndoResult, bool, error) {
+	if cur == nil {
+		_, res, err := e.Capture(ctx, ws, SnapOptions{})
+		if err != nil {
+			return UndoResult{}, false, err
+		}
+		cur = res.Files
+	}
+	if t.Status == "undone" || t.Status == "kept" {
+		op, ok, err := e.latestAppliedOp(ws.ID, t.Seq)
+		if err != nil {
+			return UndoResult{}, true, err
+		}
+		if !ok {
+			return UndoResult{}, true, os.ErrNotExist
+		}
+		var detail opDetail
+		if err := json.Unmarshal([]byte(op.Detail), &detail); err != nil {
+			return UndoResult{}, true, err
+		}
+		items := planRedoItems(detail.Items, cur)
+		return UndoResult{Turn: t, Effects: effects(items), Result: resultOf(items), Seqs: op.Targets}, true, nil
+	}
+	items, err := e.planUndoItems(ws, t, cur, nil, false)
+	if err != nil {
+		return UndoResult{}, false, err
+	}
+	return UndoResult{Turn: t, Effects: effects(items), Result: resultOf(items), Seqs: []int{t.Seq}}, false, nil
+}
+
+func (e *Engine) latestAppliedOp(ws string, seq int) (meta.Op, bool, error) {
+	ops, err := e.DB.ListOps(ws, 0)
+	if err != nil {
+		return meta.Op{}, false, err
+	}
+	for _, op := range ops {
+		if !op.Applied || op.Status == "discarded" {
+			continue
+		}
+		if op.Type != "undo" && op.Type != "rewind" && op.Type != "restore" {
+			continue
+		}
+		for _, target := range op.Targets {
+			if target == seq {
+				return op, true, nil
+			}
+		}
+	}
+	return meta.Op{}, false, nil
 }
 
 func lookup(m map[string]snapshot.Meta, path string) *snapshot.Meta {
