@@ -131,6 +131,27 @@ func TestTimelineRefreshInPlace(t *testing.T) {
 	if !strings.Contains(view, "undone") || !strings.Contains(view, "Undid #2") {
 		t.Fatalf("view:\n%s", view)
 	}
+	if strings.Contains(view, "! Undid") || !strings.Contains(view, "ok Undid") {
+		t.Fatalf("success toast:\n%s", view)
+	}
+	if !strings.Contains(view, "R redo") {
+		t.Fatalf("footer:\n%s", view)
+	}
+}
+
+func TestTimelineSuccessMark(t *testing.T) {
+	m := New(sampleRows(), "proj", "", false, false)
+	m.notice = "Undid #2"
+	m.noticeOK = true
+	m.Width = 80
+	m.Height = 20
+	view := m.View()
+	if !strings.Contains(view, "✓ Undid #2") || strings.Contains(view, "! Undid") {
+		t.Fatalf("toast:\n%s", view)
+	}
+	if !strings.Contains(view, "R redo") {
+		t.Fatalf("footer:\n%s", view)
+	}
 }
 
 func TestTimelinePromptUsesRemainingWidth(t *testing.T) {

@@ -158,12 +158,15 @@ func writtenCount(effects []engine.Effect) int {
 func groupLines(effects []engine.Effect, past bool) []string {
 	labels := map[string]string{
 		"restore": "restore", "remove": "remove", "revert": "revert",
+		"add": "add", "modify": "modify",
 		"kept": "kept", "unprotected": "kept",
 	}
 	if past {
 		labels["restore"] = "restored"
 		labels["remove"] = "removed"
 		labels["revert"] = "reverted"
+		labels["add"] = "added"
+		labels["modify"] = "modified"
 	}
 	buckets := map[string][]string{}
 	for _, ef := range effects {
@@ -177,7 +180,7 @@ func groupLines(effects []engine.Effect, past bool) []string {
 		buckets[op] = append(buckets[op], ef.Path)
 	}
 	var lines []string
-	for _, op := range []string{"restore", "remove", "revert", "kept"} {
+	for _, op := range []string{"restore", "remove", "revert", "add", "modify", "kept"} {
 		paths := buckets[op]
 		if len(paths) == 0 {
 			continue

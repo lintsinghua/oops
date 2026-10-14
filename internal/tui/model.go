@@ -63,6 +63,7 @@ type Model struct {
 	action    Action
 	quit      bool
 	notice    string
+	noticeOK  bool
 	fileIdx   int
 	Apply     ApplyFunc
 }
@@ -104,8 +105,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.diff = false
 		if msg.err != nil {
 			m.notice = msg.err.Error()
+			m.noticeOK = false
 		} else {
 			m.notice = msg.notice
+			m.noticeOK = msg.notice != ""
 		}
 		if msg.rows != nil {
 			m.Rows = msg.rows
@@ -204,6 +207,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if ok && !row.Gap {
 			if row.Status == "running" {
 				m.notice = fmt.Sprintf("#%d is still running (%s). Stop the agent first, then press enter.", row.Seq, row.Agent)
+				m.noticeOK = false
 				return m, nil
 			}
 			m.pending = "undo"
@@ -223,6 +227,7 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if row, ok := m.selected(); ok && !row.Gap {
 			if row.Status == "running" {
 				m.notice = fmt.Sprintf("#%d is still running (%s). Stop the agent first, then press enter.", row.Seq, row.Agent)
+				m.noticeOK = false
 				return m, nil
 			}
 			m.confirm = true
@@ -384,7 +389,11 @@ func (m Model) body() string {
 		b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(8, m.Width))) + "\n")
 	}
 	if m.notice != "" {
-		b.WriteString(m.styles.Warning.Render("  "+m.sym.Warn+" "+m.notice) + "\n")
+		if m.noticeOK {
+			b.WriteString(m.styles.Success.Render("  "+m.sym.OK+" "+m.notice) + "\n")
+		} else {
+			b.WriteString(m.styles.Warning.Render("  "+m.sym.Warn+" "+m.notice) + "\n")
+		}
 	}
 	vis := m.visible()
 	leftW, rightW, narrow := paneWidths(m.Width)
@@ -412,7 +421,7 @@ func (m Model) body() string {
 		b.WriteByte('\n')
 	}
 	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(8, m.Width))) + "\n")
-	b.WriteString(m.styles.Muted.Render("  ↑↓ select   enter undo   d diff   r rewind to here   / filter   ? help   q quit"))
+	b.WriteString(m.styles.Muted.Render("  ↑↓ select   enter undo   d diff   r rewind to here   R redo   / filter   ? help   q quit"))
 	if m.filtering {
 		b.WriteString("\n  filter: " + m.filter)
 	}

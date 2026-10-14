@@ -74,23 +74,24 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | BUG-2 reported writes match disk | PASS | `TestUndoAfterRedoReportsRealWrites` | The same chain, plus `undo` of a redo after a user edit. The printed file count equals the files written. When nothing is written the command says so and exits 3 |
 | BUG-3 Cursor workspace root | PASS | `TestCursorHookUsesWorkspaceRoot` | User-hook cwd `~/.cursor` is not the workspace. `workspace_roots` and `CURSOR_PROJECT_DIR` are. Several roots follow `CURSOR_PROJECT_DIR` |
 | BUG-4 init undo restores hooks | PASS | `TestInitUndoRestoresUserHooks` | Codex and Gemini configs that already had user hooks come back byte-for-byte. `*.oops-backup-*` files are removed. Event keys are not null |
-| BUG-5 agent version token | PASS | `TestVersionSkipsBanner` | A semver token is read from stdout. A stderr warning and a stdout banner are ignored |
+| BUG-5 agent version token | PASS | `TestVersionSkipsBanner`, `TestFindVersionOutputs` | The first semver token on stdout is the version, including `2.1.296 (Claude Code)` and `codex-cli 0.162.1`. Stderr is ignored. A line with no semver is not a version |
 | DEMO-1 post snapshot stays with its turn | PASS | `TestStopThenImmediateNewTurn`, `TestSlashUndoWaitsForPendingStop` | Stop exits immediately, or never queues, and the next session starts at once. The previous post is the tree at that boundary. A later scan does not rewrite it. `/oops undo` does not report the turn as still running |
-| DEMO-2 undone turns are marked | PASS | `TestTimelineUndoneMarker`, `TestPreviewUndoneSaysRedo` | An undone turn shows `undone`. The preview and confirm card say redo, not "Undo #N would" |
+| DEMO-2 undone turns are marked | PASS | `TestTimelineUndoneMarker`, `TestPreviewUndoneSaysRedo` | An undone turn shows `undone`. The preview says `Redo #N would re-apply:` with add/remove/modify counts, not the undo verbs |
 | DEMO-3 file counts ignore directories | PASS | `TestFileCountsIgnoreDirectories`, `TestFileChangesSkipDirectories` | Directories are not counted. List, show, slash, timeline preview, gap, and undo preview agree. One shared `snapshot.FileChanges` |
 | DEMO-4 redo hint suggests undo | PASS | `TestRedoHintSuggestsUndo` | After redo the hint is `oops undo` |
 | DEMO-5 diff skips directories | PASS | `TestTimelineDiffSkipsDirectory` | `d` opens the first file diff and skips an empty directory entry |
-| DEMO-6 timeline stays on the alt screen | PASS | `TestTimelineRefreshInPlace` | Undo and redo refresh the timeline in place. The program uses the alternate screen, so quit leaves the terminal clear |
+| DEMO-6 timeline stays on the alt screen | PASS | `TestTimelineRefreshInPlace`, `TestTimelineSuccessMark` | Undo and redo refresh the timeline in place. The program uses the alternate screen, so quit leaves the terminal clear. The footer shows `R redo`. A success toast uses ✓, not ! |
 | DEMO-7 timeline columns use the width | PASS | `TestTimelinePromptUsesRemainingWidth` | At 120 columns the prompt keeps the leftover width, the file count and undone marker stay visible, and paths are middle-truncated |
 | DEMO-8 /oops reads as success | PASS | `TestSlashSuccessIsShort` | The hook reply is a short `✓ oops` line. Claude still wraps it as a block decision; that wrapper is documented in both READMEs |
 | DEMO-9 subcommand help | PASS | `TestInitHelpShowsFlags` | `oops init -h` shows init's flags. The root help stays the short page |
-| DEMO-10 Gemini version is not a launch | PASS | `TestGeminiVersionDoesNotRun`, `TestGeminiInitLeavesSettings`, `TestNonSemverVersionIsUnknown` | Gemini's version is read from `@google/gemini-cli` `package.json`. The binary is not executed, so a hand-written settings file is unchanged and `init --undo` restores it byte for byte. Non-semver text is shown as `unknown` |
+| DEMO-10 Gemini version is not a launch | PASS | `TestGeminiVersionDoesNotRun`, `TestGeminiInitLeavesSettings`, `TestNonSemverVersionIsUnknown` | Gemini's version is read from `@google/gemini-cli` `package.json`. The binary is not executed, so a hand-written settings file is unchanged and `init --undo` restores it byte for byte. Output with no semver is shown as `unknown` |
+| DEMO-11 non-TTY undo | PASS | `TestUndoNonTTYLatestAndPipedNo` | A non-terminal never prompts. `oops undo` applies the latest turn and does not treat piped `n` as an answer. An older turn is refused without `-y`. On a terminal, `echo n` cancels the prompt |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 81 |
+| PASS | 82 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action

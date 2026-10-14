@@ -30,7 +30,12 @@ func newUndoCmd(opt *options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "undo [turn]",
 		Short: "Undo the last turn, or a specific one",
-		Args:  cobra.MaximumNArgs(1),
+		Long: `Undo the last turn, or a specific one.
+
+With no turn number, the latest turn is applied even when stdin is not a terminal. No prompt is shown, so piped input is not an answer: echo n | oops undo still undoes that turn.
+
+An older turn, or --force, asks Undo? [Y/n] on a terminal, and a piped answer is honored (echo n cancels). Without a terminal that undo is refused unless you pass -y. A non-terminal never prompts.`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			seq := 0
 			if len(args) == 1 {

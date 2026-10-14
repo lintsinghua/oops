@@ -169,23 +169,28 @@ func timelineRows(s *session) ([]tui.Row, error) {
 func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (string, []string) {
 	var effects []engine.Effect
 	var diffs []string
+	undone := t.Status == "undone"
 	for _, c := range snapshot.FileChanges(changes) {
-		effects = append(effects, engine.Effect{Path: c.Path, Op: c.UndoAction})
+		op := c.UndoAction
+		if undone {
+			op = reapplyOp(c.Action)
+		}
+		effects = append(effects, engine.Effect{Path: c.Path, Op: op})
 		oldB, newB := []byte(nil), []byte(nil)
 		if e != nil {
 			oldB, newB = e.ReadBlob(c.Post), e.ReadBlob(c.Pre)
 		}
 		text, err := snapshot.Unified("now/"+c.Path, "undo/"+c.Path, string(oldB), string(newB), 3)
 		if err != nil || text == "" {
-			text = c.UndoAction + " " + c.Path
+			text = op + " " + c.Path
 		}
 		if len(diffs) < 20 {
-			diffs = append(diffs, fmt.Sprintf(" #%d · %s %s\n%s", t.Seq, c.UndoAction, c.Path, text))
+			diffs = append(diffs, fmt.Sprintf(" #%d · %s %s\n%s", t.Seq, op, c.Path, text))
 		}
 	}
 	var b strings.Builder
-	if t.Status == "undone" {
-		fmt.Fprintf(&b, "  #%d is already undone.\n  Redo #%d would:\n\n", t.Seq, t.Seq)
+	if undone {
+		fmt.Fprintf(&b, "  #%d is already undone.\n  Redo #%d would re-apply:\n\n", t.Seq, t.Seq)
 	} else {
 		fmt.Fprintf(&b, "  Undo #%d would:\n\n", t.Seq)
 	}
@@ -200,6 +205,18 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 		b.WriteString("\n  ran: " + t.Prompt + "\n")
 	}
 	return b.String(), diffs
+}
+
+// reapplyOp is what redo does to put a turn's edit back.
+func reapplyOp(action string) string {
+	switch action {
+	case "added":
+		return "add"
+	case "deleted":
+		return "remove"
+	default:
+		return "modify"
+	}
 }
 
 func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
@@ -237,7 +254,7 @@ func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
 		return nil, "", err
 	}
 	if actErr != nil {
-		return rows, actErr.Error(), nil
+		return rows, "", actErr
 	}
 	return rows, notice, nil
 }
