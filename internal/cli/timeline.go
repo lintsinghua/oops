@@ -194,7 +194,7 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 	} else {
 		fmt.Fprintf(&b, "  Undo #%d would:\n\n", t.Seq)
 	}
-	lines := groupLines(effects, false)
+	lines := previewEffectLines(effects)
 	if len(lines) == 0 {
 		b.WriteString("    nothing to change\n")
 	}

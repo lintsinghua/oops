@@ -121,6 +121,92 @@ func TestNonSemverVersionIsUnknown(t *testing.T) {
 	}
 }
 
+func TestRemoveOopsDropsEmptyMatcher(t *testing.T) {
+	raw := []byte(`{"hooks":{"UserPromptExpansion":[{"matcher":"oops"}],"Stop":[{"hooks":[{"type":"command","command":"oops hook claude turn-end"}]}],"SessionStart":[{"hooks":[{"type":"command","command":"echo user-hook"}]}]}}`)
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	next, ok := RemoveOops(doc)
+	if !ok {
+		t.Fatal("expected a removal")
+	}
+	out, err := json.Marshal(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(out, []byte("oops")) || bytes.Contains(out, []byte("matcher")) || bytes.Contains(out, []byte("UserPromptExpansion")) {
+		t.Fatalf("empty matcher kept: %s", out)
+	}
+	if !bytes.Contains(out, []byte("echo user-hook")) {
+		t.Fatalf("user hook dropped: %s", out)
+	}
+	empty := map[string]any{"hooks": map[string]any{}}
+	cleared, changed := RemoveOops(empty)
+	if !changed {
+		t.Fatal("empty hooks object stayed")
+	}
+	if left, _ := cleared.(map[string]any); len(left) != 0 {
+		t.Fatalf("hooks object kept: %#v", cleared)
+	}
+}
+
+func TestUninstallDeletesOopsCreatedClaudeFile(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	if _, wrote, err := Claude().Install("oops", path, true); err != nil || !wrote {
+		t.Fatalf("install wrote=%v %v", wrote, err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil || !bytes.Contains(body, []byte("UserPromptExpansion")) {
+		t.Fatalf("settings: %s %v", body, err)
+	}
+	if _, changed, err := Claude().Uninstall(path); err != nil || !changed {
+		t.Fatalf("uninstall changed=%v %v", changed, err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("settings remain: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude")); !os.IsNotExist(err) {
+		t.Fatalf(".claude remains: %v", err)
+	}
+}
+
+func TestUninstallRestoresClaudeBytes(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".claude", "settings.json")
+	orig := []byte("{\n  \"theme\": \"dark\",\n  \"hooks\": {\n    \"Stop\": [\n      {\n        \"matcher\": \"\",\n        \"hooks\": [{\"type\": \"command\", \"command\": \"echo stay\"}]\n      }\n    ]\n  }\n}\n")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, orig, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	kept := filepath.Join(home, ".claude", "notes.txt")
+	if err := os.WriteFile(kept, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Claude().Install("oops", path, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Claude().Uninstall(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, orig) {
+		t.Fatalf("settings:\n%s", got)
+	}
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude")); err != nil {
+		t.Fatalf("dir with a user file was removed: %v", err)
+	}
+}
+
 func TestRemoveOopsDropsNullEvents(t *testing.T) {
 	doc := map[string]any{
 		"hooks": map[string]any{

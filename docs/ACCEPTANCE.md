@@ -81,7 +81,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-4 redo hint suggests undo | PASS | `TestRedoHintSuggestsUndo` | After redo the hint is `oops undo` |
 | DEMO-5 diff skips directories | PASS | `TestTimelineDiffSkipsDirectory` | `d` opens the first file diff and skips an empty directory entry |
 | DEMO-6 timeline stays on the alt screen | PASS | `TestTimelineRefreshInPlace`, `TestTimelineSuccessMark` | Undo and redo refresh the timeline in place. The program uses the alternate screen, so quit leaves the terminal clear. The footer shows `R redo`. A success toast uses ✓, not ! |
-| DEMO-7 timeline columns use the width | PASS | `TestTimelinePromptUsesRemainingWidth` | At 120 columns the prompt keeps the leftover width, the file count and undone marker stay visible, and paths are middle-truncated |
+| DEMO-7 timeline columns use the width | PASS | `TestTimelinePromptUsesRemainingWidth`, `TestTimelineLayoutAt120` | The prompt column is the terminal width minus the preview column and the fixed columns. At 120 columns the preview sits under the list, so a prompt that fits is shown in full and a 95-character prompt keeps at least 80 characters. At 170 columns the preview stays beside the list |
 | DEMO-8 /oops reads as success | PASS | `TestSlashSuccessIsShort` | The hook reply is a short `✓ oops` line. Claude still wraps it as a block decision; that wrapper is documented in both READMEs |
 | DEMO-9 subcommand help | PASS | `TestInitHelpShowsFlags` | `oops init -h` shows init's flags. The root help stays the short page |
 | DEMO-10 Gemini version is not a launch | PASS | `TestGeminiVersionDoesNotRun`, `TestGeminiInitLeavesSettings`, `TestNonSemverVersionIsUnknown` | Gemini's version is read from `@google/gemini-cli` `package.json`. The binary is not executed, so a hand-written settings file is unchanged and `init --undo` restores it byte for byte. Output with no semver is shown as `unknown` |
@@ -89,17 +89,18 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-12 undo after Stop | PASS | `TestUndoImmediatelyAfterStop`, `TestUndoCLIImmediatelyAfterStop` | Stop marks the turn ended before the hook returns. The post snapshot can still be queued. 200 immediate undos apply that turn and never say it is still running. A turn that has not received Stop exits 4 without waiting |
 | DEMO-13 end hooks are synchronous | PASS | `TestClaudeEndHooksAreSynchronous`, `TestInitRewritesAsyncClaudeEndHooks` | Claude `Stop`, `StopFailure`, and `SubagentStop` are installed without `async`. Codex, Gemini, and Cursor end hooks are synchronous too. Re-running `init` rewrites an older async entry. `init --undo` puts the previous file back byte for byte. `SessionStart` stays async |
 | DEMO-14 post snapshot finishes before Stop returns | PASS | `TestEditRightAfterStopIsKept`, `TestUndoKeepsFilesNewerThanStop`, `TestUndoForceOverwritesNewerMtime` | The real binary's turn-end hook returns only after the post snapshot is stored. An edit and a new file at that instant stay, exit 3, and the edit is reported kept. A file newer than Stop is kept even when its bytes match the post snapshot; a file that is not newer is undone. `--force` still overwrites. Runs on every OS. A timeout marks the snapshot partial |
-| DEMO-15 timeline stays on the acted-on turn | PASS | `TestTimelineStaysOnActedTurn` | After undo the cursor stays on that turn. The right pane is that turn's redo preview |
-| DEMO-16 preview keeps the file count | PASS | `TestTimelinePathCountStaysWhole`, `TestTimelinePromptUsesRemainingWidth` | At 120 columns the prompt uses the leftover width. A path is middle-truncated on its own, and `5 files` stays whole |
-| DEMO-17 toast reserves a row | PASS | `TestTimelineNoticeReservesRow` | `✓ Undid` occupies a row that is already reserved, so the list does not move down |
+| DEMO-15 timeline stays on the acted-on turn | PASS | `TestTimelineStaysOnActedTurn` | After undo the cursor stays on that turn. The preview is that turn's redo preview |
+| DEMO-16 preview keeps the file count | PASS | `TestTimelinePathCountStaysWhole`, `TestPreviewListsEachPath`, `TestPreviewPathsTruncateSeparately` | Each path is on its own line, capped, then `+K more`, and middle-truncated on its own. `5 files` stays whole. The `ran:` line wraps across lines |
+| DEMO-17 toast reserves a row | PASS | `TestTimelineNoticeReservesRow`, `TestTimelineLayoutAt120` | The toast row is reserved at the full terminal width, blank until a toast arrives. At 120×40 the first list row stays on the same line before and after undo, and the prompt is shown in full |
 | DEMO-18 init version column | PASS | `TestInitVersionColumnFits` | Column width follows the text, including `2026.10.12-d47ca18` |
 | DEMO-19 init undo removes empty dirs | PASS | `TestInitUndoRemovesEmptyDirs` | Directories oops created are removed when empty. A directory that still holds a user file stays |
+| DEMO-20 init undo clears an empty Claude home | PASS | `TestInitUndoClearsEmptyClaudeHome`, `TestInitUndoRestoresClaudeSettings`, `TestRemoveOopsDropsEmptyMatcher`, `TestUninstallDeletesOopsCreatedClaudeFile`, `TestUninstallRestoresClaudeBytes` | Matcher groups with no hooks, empty event arrays, and empty `hooks` objects are pruned. An oops-created settings file that is left as `{}` is deleted, and an empty `~/.claude` oops created is removed. A file that already existed is restored byte for byte |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 90 |
+| PASS | 91 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action

@@ -128,6 +128,39 @@ func TestRedoHintSuggestsUndo(t *testing.T) {
 	}
 }
 
+func TestPreviewListsEachPath(t *testing.T) {
+	two := []snapshot.Change{
+		{Path: "src/theme.tsx", Action: "added", UndoAction: "remove"},
+		{Path: "src/other/theme.tsx", Action: "added", UndoAction: "remove"},
+	}
+	text, _ := previewTurn(nil, meta.Turn{Seq: 4, Status: "done", Prompt: "tidy imports"}, two)
+	for _, path := range []string{"src/theme.tsx", "src/other/theme.tsx"} {
+		if !strings.Contains(text, "\n      "+path+"\n") {
+			t.Fatalf("path %s not on its own line:\n%s", path, text)
+		}
+	}
+	if strings.Contains(text, "theme.tsx,") || strings.Contains(text, ", src") {
+		t.Fatalf("paths merged:\n%s", text)
+	}
+	if !strings.Contains(text, "2 files") || strings.Contains(text, "+") {
+		t.Fatalf("count:\n%s", text)
+	}
+	if !strings.Contains(text, "\n  ran: tidy imports\n") {
+		t.Fatalf("ran:\n%s", text)
+	}
+	var many []snapshot.Change
+	for i := 0; i < 10; i++ {
+		many = append(many, snapshot.Change{Path: "f" + string(rune('0'+i)) + ".txt", Action: "added", UndoAction: "remove"})
+	}
+	capped, _ := previewTurn(nil, meta.Turn{Seq: 5, Status: "done"}, many)
+	if !strings.Contains(capped, "10 files") || !strings.Contains(capped, "+2 more") {
+		t.Fatalf("cap:\n%s", capped)
+	}
+	if strings.Contains(capped, "f8.txt") || strings.Contains(capped, "f9.txt") || !strings.Contains(capped, "f0.txt") || !strings.Contains(capped, "f7.txt") {
+		t.Fatalf("capped paths:\n%s", capped)
+	}
+}
+
 func TestPreviewUndoneSaysRedo(t *testing.T) {
 	changes := []snapshot.Change{
 		{Path: "a.txt", Action: "deleted", UndoAction: "restore"},
