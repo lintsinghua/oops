@@ -187,23 +187,25 @@ oops doesn't replace your agent's checkpoints — it covers what they miss. Use 
 
 It's built not to. Codex's previous `/undo` was removed partly because its snapshots caused problems for users, so this is oops's first rule. Snapshots are incremental (only files whose size, mtime, or mode changed are re-read), excluded directories are pruned without being walked, and each snapshot has a hard timeout (default 10s) after which it is marked partial and the hook returns. The turn-end hook does not return until the post snapshot is stored. The turn-start hook does not return until the pre snapshot is stored.
 
-Measured on 2026-10-14 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank) of 21 samples. Machine: 4 vCPU, Linux 6.12.94+ x86_64.
+Measured on 2026-10-14 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank) of 21 samples. Machine: 4 vCPU (Intel Xeon on KVM, 1 thread per core), 16 GB RAM, 256 GB virtio disk (ext4 on `/dev/vdc`; the guest reports the disk as rotational), Linux 6.12.94+ x86_64.
+
+This run measured turn-end at 112 ms / 127 ms for 10,000 files and 1.00 s / 1.11 s for 100,000 files, and turn-start at 99 ms / 153 ms and 0.89 s / 0.99 s. A designer measurement of the same kind of tree was higher: about 180 ms for Stop at 10,000 files, about 1.4 s for Stop at 100,000 files, and about 1.2 s for Start at 100,000 files. Each cell below is the higher of the two. When the designer figure is above this run's p95, that figure is both the published p50 and the published p95. Start at 10,000 files has no designer figure, so that row is this run.
 
 **Time the agent waits for the turn-end hook to return.** The post snapshot runs inside that process. `TestHookVisibleLatency` builds `./cmd/oops`, takes one cold turn, waits until any queued snapshot is stored, then times 21 `oops hook claude turn-end` processes from start to exit. The process exits after the snapshot is stored.
 
 | Files | Agent waits for turn-end hook, p50 | Agent waits for turn-end hook, p95 |
 |---:|---:|---:|
-| 10,000 | 103 ms | 107 ms |
-| 100,000 | 0.93 s | 1.00 s |
+| 10,000 | 180 ms | 180 ms |
+| 100,000 | 1.4 s | 1.4 s |
 
 **Time the agent waits for the turn-start hook to return.** The pre snapshot runs inside that process. Same method, timing `oops hook claude turn-start` after the previous post snapshot has finished, so this wait is the pre snapshot plus process startup.
 
 | Files | Agent waits for turn-start hook, p50 | Agent waits for turn-start hook, p95 |
 |---:|---:|---:|
-| 10,000 | 92 ms | 149 ms |
-| 100,000 | 0.84 s | 0.90 s |
+| 10,000 | 99 ms | 153 ms |
+| 100,000 | 1.2 s | 1.2 s |
 
-On this run a 10,000-file post snapshot kept the turn-end hook under 103 ms at p50. The default 10s timeout marks a snapshot partial and the hook still returns. If the previous post snapshot was killed mid-scan, the turn-start hook waits for the leftover job first, bounded at 30 seconds (`TestWaitPendingBounded`). When that job is already finished, the extra wait is under 50 ms. A dead process does not drop the turn: the job file stays until a later command stores the post snapshot (`TestCrashedChildFinishesTurn`). In-process hot Capture on 2026-10-13, without process startup, was 82 ms / 91 ms at 10k files and 0.82 s / 3.5 s at 100k (`TestHotCapturePercentiles`). The tables above are the later measurement of the wait the agent sees.
+The published p50 for a 10,000-file post snapshot is 180 ms. The default 10s timeout marks a snapshot partial and the hook still returns. If the previous post snapshot was killed mid-scan, the turn-start hook waits for the leftover job first, bounded at 30 seconds (`TestWaitPendingBounded`). When that job is already finished, the extra wait is under 50 ms. A dead process does not drop the turn: the job file stays until a later command stores the post snapshot (`TestCrashedChildFinishesTurn`). In-process hot Capture on 2026-10-13, without process startup, was 82 ms / 91 ms at 10k files and 0.82 s / 3.5 s at 100k (`TestHotCapturePercentiles`). The tables above are the later measurement of the wait the agent sees.
 
 **Cold start and memory while scanning.** `TestColdStart10k` times the first in-process Capture of 10,000 files totaling 300,000,000 bytes. On this machine that took 0.69 s (the limit in the PRD is 3 s on Linux). `TestScanRSS100k` sampled VmRSS during a scan of 100,000 files and peaked at 119.5 MiB, 125,341,696 bytes (the limit in the PRD is 150 MB). Measured 2026-10-13. These two figures are one sample each, not a percentile.
 </details>

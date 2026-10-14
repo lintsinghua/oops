@@ -401,103 +401,249 @@ func (m Model) View() string {
 }
 
 func (m Model) body() string {
-	var b strings.Builder
-	if m.Height >= 15 {
-		b.WriteString(m.styles.Bold.Render(" oops") + "  " + m.Header + "\n")
-		b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(8, m.Width))) + "\n")
+	width := m.Width
+	if width < 1 {
+		width = 80
+	}
+	height := m.Height
+	if height < 1 {
+		height = 24
+	}
+	rule := m.styles.Muted.Render(strings.Repeat("─", max(8, width)))
+	var head, foot []string
+	if height >= 15 {
+		head = append(head, m.styles.Bold.Render(" oops")+"  "+m.Header)
+		head = append(head, rule)
 	}
 	// One full-width row, blank until a toast arrives, so the list does not jump.
-	b.WriteString(m.noticeLine() + "\n")
+	head = append(head, m.noticeLine())
+	foot = append(foot, rule)
+	foot = append(foot, m.styles.Muted.Render("  ↑↓ select   enter undo   d diff   r rewind to here   R redo   / filter   ? help   q quit"))
+	if m.filtering {
+		foot = append(foot, "  filter: "+m.filter)
+	}
+	budget := height - len(head) - len(foot)
+	if budget < 1 {
+		budget = 1
+	}
 	vis := m.visible()
 	preview := ""
 	if row, ok := m.selected(); ok {
 		preview = row.Preview
 	}
-	leftW, rightW, stacked := paneWidths(m.Width)
+	leftW, rightW, stacked := paneWidths(width)
 	markW := ui.DisplayWidth(" " + m.sym.Selected)
 	if markW < 2 {
 		markW = 2
 	}
-	var left, right strings.Builder
-	for i, r := range vis {
+	cursor := m.cursor
+	if cursor < 0 || cursor >= len(vis) {
+		cursor = 0
+	}
+	var mid []string
+	if stacked {
+		mid = m.stackedLines(vis, cursor, preview, leftW, markW, width, budget)
+	} else {
+		mid = m.sideLines(vis, cursor, preview, leftW, rightW, markW, budget)
+	}
+	if len(mid) > budget {
+		mid = mid[:budget]
+	}
+	all := append(append(head, mid...), foot...)
+	if len(all) > height {
+		all = all[:height]
+	}
+	return strings.Join(all, "\n")
+}
+
+// stackedLines draws the list, a rule, then a preview clipped to the rows left.
+func (m Model) stackedLines(vis []Row, cursor int, preview string, leftW, markW, width, budget int) []string {
+	fitted := previewLines(preview, width)
+	listBudget := budget
+	previewBudget := 0
+	if len(fitted) > 0 {
+		switch {
+		case len(vis)+1+len(fitted) <= budget:
+			listBudget = len(vis)
+			previewBudget = len(fitted)
+		case len(vis)+1 < budget:
+			listBudget = len(vis)
+			previewBudget = budget - len(vis) - 1
+		default:
+			previewBudget = 1
+			if budget >= 8 {
+				previewBudget = min(4, budget/3)
+			}
+			if previewBudget >= budget {
+				previewBudget = max(0, budget-1)
+			}
+			listBudget = budget - 1 - previewBudget
+		}
+		if listBudget < 1 {
+			listBudget = min(1, budget)
+			previewBudget = max(0, budget-listBudget-1)
+		}
+	}
+	shown, highlight := windowRows(vis, cursor, listBudget)
+	out := m.renderList(shown, highlight, leftW, markW, width)
+	if previewBudget > 0 && len(fitted) > 0 {
+		out = append(out, m.styles.Muted.Render(strings.Repeat("─", max(8, width))))
+		out = append(out, clipPreview(fitted, previewBudget)...)
+	}
+	return out
+}
+
+// sideLines keeps the preview beside the list. The divider is one row per
+// line of the taller pane, so it reaches the bottom of that block.
+func (m Model) sideLines(vis []Row, cursor int, preview string, leftW, rightW, markW, budget int) []string {
+	shown, highlight := windowRows(vis, cursor, budget)
+	list := m.renderList(shown, highlight, leftW, markW, leftW)
+	right := clipPreview(previewLines(preview, rightW), budget)
+	n := max(len(list), len(right))
+	if n > budget {
+		n = budget
+	}
+	if len(list) > n {
+		list = list[:n]
+	}
+	if len(right) > n {
+		right = clipPreview(right, n)
+	}
+	for len(list) < n {
+		list = append(list, padDisplay("", leftW))
+	}
+	for len(right) < n {
+		right = append(right, "")
+	}
+	sep := make([]string, n)
+	bar := m.styles.Muted.Render(" │ ")
+	for i := range sep {
+		sep[i] = bar
+	}
+	if n == 0 {
+		return nil
+	}
+	joined := lipgloss.JoinHorizontal(lipgloss.Top, strings.Join(list, "\n"), strings.Join(sep, "\n"), strings.Join(right, "\n"))
+	return strings.Split(joined, "\n")
+}
+
+func (m Model) renderList(rows []Row, highlight, lineW, markW, paneW int) []string {
+	out := make([]string, 0, len(rows))
+	for i, r := range rows {
 		mark := strings.Repeat(" ", markW)
-		if i == m.cursor && !r.Gap {
+		if i == highlight && !r.Gap {
 			mark = " " + m.sym.Selected
 			if pad := markW - ui.DisplayWidth(mark); pad > 0 {
 				mark += strings.Repeat(" ", pad)
 			}
 		}
-		line := mark + m.line(r, listLineWidth(leftW, markW))
-		if i == m.cursor && !r.Gap {
+		line := padDisplay(mark+m.line(r, listLineWidth(lineW, markW)), paneW)
+		if i == highlight && !r.Gap {
 			line = m.styles.Select.Render(line)
 		} else if r.Gap || r.Status == "undone" {
 			line = m.styles.Muted.Render(line)
 		}
-		left.WriteString(line + "\n")
+		out = append(out, line)
 	}
-	previewWidth := m.Width
-	if !stacked {
-		previewWidth = rightW
-	}
-	if strings.TrimSpace(preview) != "" {
-		right.WriteString(fitPreview(preview, previewWidth))
-	}
-	if stacked {
-		b.WriteString(left.String())
-		if right.Len() > 0 {
-			b.WriteString(right.String())
-			b.WriteByte('\n')
-		}
-	} else {
-		b.WriteString(lipgloss.JoinHorizontal(lipgloss.Top, left.String(), m.styles.Muted.Render(" │ "), right.String()))
-		b.WriteByte('\n')
-	}
-	b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(8, m.Width))) + "\n")
-	b.WriteString(m.styles.Muted.Render("  ↑↓ select   enter undo   d diff   r rewind to here   R redo   / filter   ? help   q quit"))
-	if m.filtering {
-		b.WriteString("\n  filter: " + m.filter)
-	}
-	return b.String()
+	return out
 }
 
+const (
+	fileColWidth   = 10
+	statusColWidth = 7
+)
+
 func (m Model) line(r Row, width int) string {
+	tailW := fileColWidth + statusColWidth
 	if r.Gap {
 		s := fmt.Sprintf(" %s    %-7s %-11s %s", m.sym.Gap, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11), r.Prompt)
-		return ui.Truncate(s, max(10, width))
-	}
-	files := ui.Plural(r.Files, "file", "files")
-	status := ""
-	if r.Status == "running" || r.Status == "undone" {
-		status = "  " + r.Status
+		room := width - tailW
+		if room < 1 {
+			return ui.Truncate(s, max(1, width))
+		}
+		return padDisplay(ui.Truncate(s, room), room) + rightCol("", fileColWidth) + rightCol("", statusColWidth)
 	}
 	prefix := fmt.Sprintf(" #%-4d %-7s %-11s ", r.Seq, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11))
-	suffix := " " + files + status
-	prompt := ""
-	remain := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(suffix)
-	if r.Prompt != "" && remain > 2 {
-		// The prompt column is whatever is left on this line. Quotes cost two
-		// columns, and an ellipsis costs one more when the text does not fit.
-		inner := remain - 2
-		if ui.DisplayWidth(r.Prompt) > inner && inner > 1 {
-			inner--
-		}
-		if inner < 1 {
-			inner = 1
-		}
-		prompt = ui.Quote(r.Prompt, inner)
-		for ui.DisplayWidth(prefix+prompt+suffix) > width && inner > 1 {
-			inner--
-			prompt = ui.Quote(r.Prompt, inner)
-		}
+	file := rightCol(ui.Plural(r.Files, "file", "files"), fileColWidth)
+	statusText := ""
+	if r.Status == "running" || r.Status == "undone" {
+		statusText = r.Status
 	}
-	s := prefix + prompt + suffix
-	if width > 0 && ui.DisplayWidth(s) > width {
-		s = prefix + suffix
-		if ui.DisplayWidth(s) > width {
-			return ui.Truncate(prefix, width)
-		}
+	status := rightCol(statusText, statusColWidth)
+	tail := file + status
+	promptWidth := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(tail)
+	if promptWidth < 0 {
+		promptWidth = 0
+	}
+	return prefix + promptField(r.Prompt, promptWidth) + tail
+}
+
+// promptField quotes and truncates the prompt to width, then pads so the
+// file-count and status columns stay on the right.
+func promptField(prompt string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if prompt == "" {
+		return strings.Repeat(" ", width)
+	}
+	inner := width - 2
+	if inner < 1 {
+		return padDisplay(ui.Truncate(prompt, width), width)
+	}
+	if ui.DisplayWidth(prompt) > inner && inner > 1 {
+		inner--
+	}
+	quoted := ui.Quote(prompt, inner)
+	for ui.DisplayWidth(quoted) > width && inner > 1 {
+		inner--
+		quoted = ui.Quote(prompt, inner)
+	}
+	if ui.DisplayWidth(quoted) > width {
+		quoted = ui.Truncate(quoted, width)
+	}
+	return padDisplay(quoted, width)
+}
+
+func rightCol(s string, width int) string {
+	if ui.DisplayWidth(s) > width {
+		return ui.Truncate(s, width)
+	}
+	return strings.Repeat(" ", width-ui.DisplayWidth(s)) + s
+}
+
+func padDisplay(s string, width int) string {
+	w := ui.DisplayWidth(s)
+	if w > width {
+		return ui.Truncate(s, width)
+	}
+	if w < width {
+		return s + strings.Repeat(" ", width-w)
 	}
 	return s
+}
+
+func windowRows(rows []Row, cursor, limit int) (shown []Row, highlight int) {
+	if limit < 1 || len(rows) == 0 {
+		return nil, 0
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor >= len(rows) {
+		cursor = len(rows) - 1
+	}
+	if len(rows) <= limit {
+		return rows, cursor
+	}
+	start := cursor - limit/2
+	if start < 0 {
+		start = 0
+	}
+	if start+limit > len(rows) {
+		start = len(rows) - limit
+	}
+	return rows[start : start+limit], cursor - start
 }
 
 // noticeLine is always one terminal row. A single space is not a row: some
@@ -563,6 +709,199 @@ func paneWidths(width int) (left, right int, stacked bool) {
 		return width, 0, true
 	}
 	return width - right - sep, right, false
+}
+
+func previewLines(preview string, width int) []string {
+	if strings.TrimSpace(preview) == "" {
+		return nil
+	}
+	text := normalizePreview(fitPreview(preview, width))
+	lines := strings.Split(text, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+// normalizePreview gives the pane one indent for prose and one for paths.
+func normalizePreview(preview string) string {
+	lines := strings.Split(preview, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		if trim == "" {
+			out = append(out, "")
+			continue
+		}
+		indent := "  "
+		if isPreviewPath(line) || isMoreLine(line) {
+			indent = "    "
+		}
+		out = append(out, indent+trim)
+	}
+	return strings.Join(out, "\n")
+}
+
+// clipPreview keeps the header and shortens the file list so the block fits
+// in max lines. A tight row becomes `src/api.ts … +3 more`.
+func clipPreview(lines []string, max int) []string {
+	if max <= 0 || len(lines) == 0 {
+		return nil
+	}
+	if len(lines) <= max {
+		return lines
+	}
+	start, end := pathSpan(lines)
+	if start < 0 {
+		return lines[:max]
+	}
+	head := append([]string(nil), lines[:start]...)
+	mid := append([]string(nil), lines[start:end]...)
+	tail := append([]string(nil), lines[end:]...)
+	extra := 0
+	if len(mid) > 0 {
+		if n, ok := moreCount(mid[len(mid)-1]); ok {
+			extra = n
+			mid = mid[:len(mid)-1]
+		}
+	}
+	// Keep at most the first ran line once the block is taller than the budget.
+	var keptTail []string
+	for _, line := range tail {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		keptTail = append(keptTail, line)
+		break
+	}
+	tail = keptTail
+	for len(head)+len(tail) >= max && len(tail) > 0 {
+		tail = tail[:len(tail)-1]
+	}
+	for len(head)+len(tail) >= max && len(head) > 1 {
+		// Drop a blank header line before dropping the title.
+		dropped := false
+		for i := len(head) - 1; i > 0; i-- {
+			if strings.TrimSpace(head[i]) == "" {
+				head = append(head[:i], head[i+1:]...)
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			break
+		}
+	}
+	room := max - len(head) - len(tail)
+	if room < 1 {
+		if len(head) >= max {
+			return head[:max]
+		}
+		out := append(head, tail...)
+		if len(out) > max {
+			return out[:max]
+		}
+		return out
+	}
+	if extra == 0 && len(mid) <= room {
+		return append(append(head, mid...), tail...)
+	}
+	if room == 1 {
+		k := extra
+		if len(mid) > 1 {
+			k += len(mid) - 1
+		} else if len(mid) == 0 {
+			k = extra
+		}
+		return append(append(head, compactPaths(mid, k)), tail...)
+	}
+	keep := room - 1
+	if keep > len(mid) {
+		keep = len(mid)
+	}
+	k := extra + len(mid) - keep
+	kept := append([]string(nil), mid[:keep]...)
+	if k > 0 {
+		kept = append(kept, moreLineText(k, mid))
+	}
+	out := append(append(head, kept...), tail...)
+	if len(out) > max {
+		return out[:max]
+	}
+	return out
+}
+
+func compactPaths(mid []string, extra int) string {
+	if len(mid) == 0 {
+		return fmt.Sprintf("    +%d more", extra)
+	}
+	path := strings.TrimSpace(mid[0])
+	if extra <= 0 {
+		return "    " + path
+	}
+	return fmt.Sprintf("    %s … +%d more", path, extra)
+}
+
+func moreLineText(k int, mid []string) string {
+	indent := "    "
+	if len(mid) > 0 {
+		line := mid[0]
+		if i := len(line) - len(strings.TrimLeft(line, " ")); i > 0 {
+			indent = line[:i]
+		}
+	}
+	return indent + fmt.Sprintf("+%d more", k)
+}
+
+func pathSpan(lines []string) (start, end int) {
+	start = -1
+	for i, line := range lines {
+		if isPreviewPath(line) || isMoreLine(line) {
+			if start < 0 {
+				start = i
+			}
+			end = i + 1
+			continue
+		}
+		if start >= 0 {
+			return start, end
+		}
+	}
+	return start, end
+}
+
+func isMoreLine(line string) bool {
+	_, ok := moreCount(line)
+	return ok
+}
+
+func moreCount(line string) (int, bool) {
+	trim := strings.TrimSpace(line)
+	if !strings.HasPrefix(trim, "+") || !strings.HasSuffix(trim, " more") {
+		return 0, false
+	}
+	var n int
+	if _, err := fmt.Sscanf(trim, "+%d more", &n); err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func isPreviewPath(line string) bool {
+	trim := strings.TrimSpace(line)
+	if trim == "" || isMoreLine(line) {
+		return false
+	}
+	if strings.Contains(line, "ran:") || strings.Contains(trim, " file") || strings.Contains(trim, "would") || strings.Contains(trim, "nothing") || strings.Contains(trim, "undone") || strings.Contains(trim, "re-apply") {
+		return false
+	}
+	if !strings.HasPrefix(line, " ") {
+		return false
+	}
+	if strings.Contains(trim, " ") && !strings.Contains(trim, "/") && !strings.Contains(trim, "…") {
+		return false
+	}
+	return true
 }
 
 func fitPreview(preview string, width int) string {
