@@ -45,19 +45,21 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	if verb == "rewind" {
 		title = fmt.Sprintf("%s Rewound to before #%d", sym.OK, res.Seqs[0])
 	}
+	kept := 0
+	for _, ef := range res.Effects {
+		if ef.Dir {
+			continue
+		}
+		if ef.Op == "kept" || ef.Op == "unprotected" {
+			kept++
+		}
+	}
 	if verb == "redo" {
 		title = fmt.Sprintf("%s Redid the last change — back to how it was (%s).", sym.OK, ui.Plural(engine.CountFileEffects(res.Effects), "file", "files"))
-	}
-	if res.Result == "partial" {
-		kept := 0
-		for _, ef := range res.Effects {
-			if ef.Dir {
-				continue
-			}
-			if ef.Op == "kept" || ef.Op == "unprotected" {
-				kept++
-			}
+		if res.Result == "partial" {
+			title = fmt.Sprintf("%s Redid the last change, except %s you changed afterwards.", sym.Warn, ui.Plural(kept, "file", "files"))
 		}
+	} else if res.Result == "partial" {
 		title = fmt.Sprintf("%s Undid turn #%d, except %s you changed afterwards.", sym.Warn, res.Turn.Seq, ui.Plural(kept, "file", "files"))
 	}
 	fmt.Fprintln(w, st.Success.Render(title))
@@ -65,7 +67,7 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	for _, line := range groupLines(res.Effects, true) {
 		fmt.Fprintln(w, "  "+line)
 	}
-	if res.Result == "partial" {
+	if res.Result == "partial" && verb != "redo" {
 		fmt.Fprintln(w)
 		for _, ef := range res.Effects {
 			if ef.Op == "kept" || ef.Op == "unprotected" {

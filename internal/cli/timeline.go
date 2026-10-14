@@ -141,9 +141,13 @@ func timelineRows(s *session) ([]tui.Row, error) {
 		if t.Kind == "safety" {
 			continue
 		}
+		status := t.Status
+		if len(t.Stats.Kept) > 0 {
+			status = strings.Join(t.Stats.Kept, ", ")
+		}
 		row := tui.Row{
 			Seq: t.Seq, Agent: t.Agent, When: ui.RelTime(now, t.StartedAt),
-			Prompt: t.Prompt, Files: t.Stats.Files, Status: t.Status,
+			Prompt: t.Prompt, Files: t.Stats.Files, Status: status,
 		}
 		changes, err := s.e.ChangesBetween(t)
 		if err == nil {
@@ -191,6 +195,8 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 	var b strings.Builder
 	if undone {
 		fmt.Fprintf(&b, "  #%d is already undone.\n  Redo #%d would re-apply:\n\n", t.Seq, t.Seq)
+	} else if len(t.Stats.Kept) > 0 {
+		fmt.Fprintf(&b, "  #%d kept %s.\n  Undo #%d would:\n\n", t.Seq, strings.Join(t.Stats.Kept, ", "), t.Seq)
 	} else {
 		fmt.Fprintf(&b, "  Undo #%d would:\n\n", t.Seq)
 	}
@@ -219,6 +225,22 @@ func reapplyOp(action string) string {
 	}
 }
 
+func undoNotice(res engine.UndoResult) string {
+	var kept []string
+	for _, ef := range res.Effects {
+		if ef.Dir {
+			continue
+		}
+		if ef.Op == "kept" || ef.Op == "unprotected" {
+			kept = append(kept, ef.Path)
+		}
+	}
+	if len(kept) == 0 {
+		return fmt.Sprintf("Undid #%d", res.Turn.Seq)
+	}
+	return fmt.Sprintf("Undid #%d, except %s", res.Turn.Seq, strings.Join(kept, ", "))
+}
+
 func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
 	ctx := context.Background()
 	var notice string
@@ -229,7 +251,7 @@ func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
 		if err != nil {
 			actErr = err
 		} else {
-			notice = fmt.Sprintf("Undid #%d", res.Turn.Seq)
+			notice = undoNotice(res)
 		}
 	case "rewind":
 		res, err := s.e.Rewind(ctx, s.ws, a.Seq, false, false)
@@ -246,7 +268,7 @@ func applyTimeline(s *session, a tui.Action) ([]tui.Row, string, error) {
 		if _, err := s.e.Redo(ctx, s.ws, false); err != nil {
 			actErr = err
 		} else {
-			notice = "Redid the last undo"
+			notice = "Redid the last change"
 		}
 	}
 	rows, err := timelineRows(s)

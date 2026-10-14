@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"github.com/lintsinghua/oops/internal/platform"
 	"github.com/lintsinghua/oops/internal/restore"
 	"github.com/lintsinghua/oops/internal/snapshot"
+	"github.com/lintsinghua/oops/internal/store"
 )
 
 // UndoRequest selects what to reverse.
@@ -97,9 +97,11 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 	if err != nil {
 		return UndoResult{}, err
 	}
-	items := restore.Plan(paths, post, pre, curRes.Files, req.Force)
+	own, _ := e.loadOwnWrites(req.Workspace)
+	windows := []snapWindow{{Start: t.EndedAt, Done: t.Stats.SnapDone}}
+	items := restore.Plan(paths, withBaseline(post, own, t.EndedAt), pre, curRes.Files, req.Force)
 	if !req.Force {
-		preserveAfterStop(req.Workspace.Path, items, t.EndedAt)
+		preserveAfterStop(items, windows, post, curRes.Files, own)
 	}
 	res := UndoResult{Turn: t, Result: resultOf(items), DryRun: req.DryRun, Seqs: []int{t.Seq}}
 	res.Effects = effects(items)
@@ -117,6 +119,15 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 			return res, err
 		}
 		t.Status = "undone"
+		t.Stats.Kept = nil
+		_ = e.DB.UpdateTurn(t)
+		res.Turn = t
+	} else if hasKept(items) {
+		t.Status = "kept"
+		t.Stats.Kept = keptPaths(items)
+		if err := e.DB.UpdateTurn(t); err != nil {
+			return res, err
+		}
 		res.Turn = t
 	}
 	return res, nil
@@ -213,9 +224,11 @@ func (e *Engine) Rewind(ctx context.Context, ws Workspace, seq int, force, dry b
 	if err != nil {
 		return UndoResult{}, err
 	}
-	items := restore.Plan(paths, expected, pre, curRes.Files, force)
+	own, _ := e.loadOwnWrites(ws)
+	windows := snapWindows(turns)
+	items := restore.Plan(paths, withBaseline(expected, own, earliestStart(windows)), pre, curRes.Files, force)
 	if !force {
-		preserveAfterStop(ws.Path, items, latestStop(turns))
+		preserveAfterStop(items, windows, expected, curRes.Files, own)
 	}
 	var seqs []int
 	for _, t := range turns {
@@ -365,7 +378,9 @@ func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, 
 	}
 	for _, seq := range op.Targets {
 		if t, err := e.DB.GetTurn(ws.ID, seq); err == nil && op.Type != "restore" {
-			_ = e.DB.SetStatus(t.ID, "done")
+			t.Status = "done"
+			t.Stats.Kept = nil
+			_ = e.DB.UpdateTurn(t)
 		}
 	}
 	return res, nil
@@ -427,11 +442,20 @@ func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool
 	if err := e.DB.SetOpApplied(op.ID, true); err != nil {
 		return res, err
 	}
-	if !hasKept(items) && op.Type != "restore" {
+	if op.Type != "restore" {
 		for _, seq := range op.Targets {
-			if t, err := e.DB.GetTurn(ws.ID, seq); err == nil {
-				_ = e.DB.SetStatus(t.ID, "undone")
+			t, err := e.DB.GetTurn(ws.ID, seq)
+			if err != nil {
+				continue
 			}
+			if hasKept(items) {
+				t.Status = "kept"
+				t.Stats.Kept = keptPaths(items)
+			} else {
+				t.Status = "undone"
+				t.Stats.Kept = nil
+			}
+			_ = e.DB.UpdateTurn(t)
 		}
 	}
 	if err := e.commitJournal(ws); err != nil {
@@ -468,7 +492,10 @@ func (e *Engine) restoreItems(ws Workspace, j restore.Journal, items []restore.I
 	if err := restore.WriteJournal(jpath, j); err != nil {
 		return err
 	}
-	return restore.Apply(ws.Path, e.Store, items)
+	if err := restore.Apply(ws.Path, e.Store, items); err != nil {
+		return err
+	}
+	return e.noteOwnWrites(ws, items)
 }
 
 func (e *Engine) commitJournal(ws Workspace) error {
@@ -507,11 +534,13 @@ func (e *Engine) ResumeJournal(ctx context.Context, ws Workspace) (string, error
 					}
 				}
 				_ = restore.Apply(ws.Path, e.Store, back)
+				_ = e.noteOwnWrites(ws, back)
 			}
 		}
 		_ = os.Remove(jpath)
 		return "rolled-back", err
 	}
+	_ = e.noteOwnWrites(ws, j.Items)
 	if err := e.recordJournalOp(j); err != nil {
 		return "finished", err
 	}
@@ -563,86 +592,273 @@ func (e *Engine) recordJournalOp(j restore.Journal) error {
 	return nil
 }
 
-func latestStop(turns []meta.Turn) time.Time {
-	var stop time.Time
-	for _, t := range turns {
-		if t.EndedAt.After(stop) {
-			stop = t.EndedAt
-		}
-	}
-	return stop
+// snapWindow is the time the post snapshot was being written.
+// A file modified in this window may already be inside the post snapshot,
+// so its bytes cannot show that the user touched it.
+type snapWindow struct {
+	Start time.Time
+	Done  time.Time
 }
 
-// preserveAfterStop keeps any file whose mtime is later than Stop.
-// The post snapshot can still contain that write when the edit landed during
-// the scan. A directory removal is kept when a file inside it is newer, so
-// undo does not delete a user file by removing its parent. Equal mtimes are
-// not later. --force skips this pass.
-func preserveAfterStop(root string, items []restore.Item, stop time.Time) {
-	if stop.IsZero() {
-		return
+func snapWindows(turns []meta.Turn) []snapWindow {
+	var out []snapWindow
+	for _, t := range turns {
+		if t.EndedAt.IsZero() || t.Stats.SnapDone.IsZero() {
+			continue
+		}
+		out = append(out, snapWindow{Start: t.EndedAt, Done: t.Stats.SnapDone})
 	}
+	return out
+}
+
+// preserveAfterStop keeps a user edit. A file whose mtime falls inside the
+// post-snapshot window is a user edit. Every other file is a user edit only
+// when its content differs from the baseline: the post snapshot, or the
+// bytes the latest undo or redo wrote. --force skips this pass.
+func preserveAfterStop(items []restore.Item, windows []snapWindow, expected, cur map[string]snapshot.Meta, own map[string]ownWrite) {
 	for i := range items {
 		it := &items[i]
 		switch it.Op {
 		case "skip", "kept", "unprotected":
 			continue
 		}
-		newer := false
 		if planIsDir(*it) {
-			if it.Op == "remove" {
-				newer = dirHasNewerFile(root, it.Path, stop)
+			if it.Op == "remove" && dirHasUserEdit(it.Path, windows, expected, cur, own) {
+				it.Op = "kept"
+				it.Reason = "changed_after_turn"
 			}
-		} else {
-			newer = fileNewerThan(root, it.Path, stop)
+			continue
 		}
-		if newer {
+		if userEdited(it.Path, it.Before, windows, expected, own) {
 			it.Op = "kept"
 			it.Reason = "changed_after_turn"
 		}
 	}
 }
 
+// userEdited applies the baseline rule. An undo or redo baseline wins: matching
+// those bytes is not a user edit. Otherwise an mtime inside the snapshot
+// window is a user edit, and any other content difference is a user edit.
+func userEdited(path string, now *snapshot.Meta, windows []snapWindow, expected map[string]snapshot.Meta, own map[string]ownWrite) bool {
+	if rec, ok := freshWrite(own, path, earliestStart(windows)); ok {
+		return !baselineMatch(now, rec)
+	}
+	if mtimeInWindows(now, windows) {
+		return true
+	}
+	return !snapshot.SameState(now, lookupMeta(expected, path))
+}
+
+func baselineMatch(now *snapshot.Meta, rec ownWrite) bool {
+	if now == nil {
+		return rec.Gone
+	}
+	if rec.Gone {
+		return false
+	}
+	return rec.Hash != "" && now.Kind == snapshot.KindFile && now.ID.String() == rec.Hash
+}
+
+func mtimeInWindows(now *snapshot.Meta, windows []snapWindow) bool {
+	if now == nil || now.Mtime == 0 {
+		return false
+	}
+	mt := time.Unix(0, now.Mtime)
+	for _, w := range windows {
+		if w.Start.IsZero() || w.Done.IsZero() {
+			continue
+		}
+		if !mt.Before(w.Start) && !mt.After(w.Done) {
+			return true
+		}
+	}
+	return false
+}
+
+func lookupMeta(m map[string]snapshot.Meta, path string) *snapshot.Meta {
+	if v, ok := m[path]; ok {
+		cp := v
+		return &cp
+	}
+	return nil
+}
+
+func dirHasUserEdit(rel string, windows []snapWindow, expected, cur map[string]snapshot.Meta, own map[string]ownWrite) bool {
+	prefix := strings.TrimSuffix(rel, "/") + "/"
+	seen := map[string]struct{}{}
+	for path, now := range cur {
+		if path != strings.TrimSuffix(rel, "/") && !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if path == strings.TrimSuffix(rel, "/") {
+			continue
+		}
+		seen[path] = struct{}{}
+		cp := now
+		if userEdited(path, &cp, windows, expected, own) {
+			return true
+		}
+	}
+	base := strings.TrimSuffix(rel, "/")
+	for path := range expected {
+		if _, ok := seen[path]; ok || path == base {
+			continue
+		}
+		if !strings.HasPrefix(path, prefix) {
+			continue
+		}
+		if userEdited(path, nil, windows, expected, own) {
+			return true
+		}
+	}
+	return false
+}
+
+// withBaseline overlays bytes oops wrote on the post snapshot. Later undos
+// compare against that write, not the original post snapshot.
+func earliestStart(windows []snapWindow) time.Time {
+	var start time.Time
+	for _, w := range windows {
+		if w.Start.IsZero() {
+			continue
+		}
+		if start.IsZero() || w.Start.Before(start) {
+			start = w.Start
+		}
+	}
+	return start
+}
+
+// freshWrite is an undo or redo that happened after this turn's Stop.
+// An earlier write belongs to a previous turn; the post snapshot is the baseline.
+func freshWrite(own map[string]ownWrite, path string, stop time.Time) (ownWrite, bool) {
+	rec, ok := own[path]
+	if !ok {
+		return ownWrite{}, false
+	}
+	if !stop.IsZero() && rec.At != 0 && rec.At < stop.UnixNano() {
+		return ownWrite{}, false
+	}
+	return rec, true
+}
+
+func withBaseline(expected map[string]snapshot.Meta, own map[string]ownWrite, stop time.Time) map[string]snapshot.Meta {
+	if len(own) == 0 {
+		return expected
+	}
+	out := make(map[string]snapshot.Meta, len(expected)+len(own))
+	for k, v := range expected {
+		out[k] = v
+	}
+	for path, rec := range own {
+		if _, ok := freshWrite(own, path, stop); !ok {
+			continue
+		}
+		if rec.Gone {
+			delete(out, path)
+			continue
+		}
+		if rec.Hash == "" {
+			continue
+		}
+		id, err := store.ParseID(rec.Hash)
+		if err != nil {
+			continue
+		}
+		m := out[path]
+		m.Path = path
+		m.Kind = snapshot.KindFile
+		m.ID = id
+		m.Mtime = rec.Mtime
+		if m.Mode == 0 {
+			m.Mode = 0o644
+		}
+		out[path] = m
+	}
+	return out
+}
+
+func keptPaths(items []restore.Item) []string {
+	var out []string
+	for _, it := range items {
+		if it.Op != "kept" && it.Op != "unprotected" {
+			continue
+		}
+		if planIsDir(it) {
+			continue
+		}
+		out = append(out, it.Path)
+	}
+	return out
+}
+
+type ownWrite struct {
+	Mtime int64  `json:"mtime,omitempty"`
+	At    int64  `json:"at,omitempty"`
+	Hash  string `json:"hash,omitempty"`
+	Gone  bool   `json:"gone,omitempty"`
+}
+
+func (e *Engine) ownWritePath(ws Workspace) string {
+	return filepath.Join(e.wsDir(ws.ID), "own-writes.json")
+}
+
+func (e *Engine) loadOwnWrites(ws Workspace) (map[string]ownWrite, error) {
+	raw, err := os.ReadFile(e.ownWritePath(ws))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return map[string]ownWrite{}, nil
+		}
+		return nil, err
+	}
+	out := map[string]ownWrite{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]ownWrite{}, nil
+	}
+	return out, nil
+}
+
+func (e *Engine) noteOwnWrites(ws Workspace, items []restore.Item) error {
+	own, err := e.loadOwnWrites(ws)
+	if err != nil {
+		return err
+	}
+	if own == nil {
+		own = map[string]ownWrite{}
+	}
+	for _, it := range items {
+		switch it.Op {
+		case "restore", "revert", "remove":
+		default:
+			continue
+		}
+		full, err := platform.SafeRel(ws.Path, strings.TrimSuffix(it.Path, "/"))
+		if err != nil {
+			continue
+		}
+		st, err := os.Lstat(platform.LongPath(full))
+		if err != nil {
+			own[it.Path] = ownWrite{Gone: true, At: time.Now().UnixNano()}
+			continue
+		}
+		rec := ownWrite{Mtime: st.ModTime().UnixNano(), At: time.Now().UnixNano()}
+		if it.Want != nil && it.Want.Kind == snapshot.KindFile && !it.Want.ID.IsZero() {
+			rec.Hash = it.Want.ID.String()
+		}
+		own[it.Path] = rec
+	}
+	if err := os.MkdirAll(filepath.Dir(e.ownWritePath(ws)), 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(own)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(e.ownWritePath(ws), raw, 0o600)
+}
+
 func planIsDir(it restore.Item) bool {
 	return metaIsDir(it.Want) || metaIsDir(it.Before) || strings.HasSuffix(it.Path, "/")
-}
-
-func fileNewerThan(root, rel string, stop time.Time) bool {
-	full, err := platform.SafeRel(root, strings.TrimSuffix(rel, "/"))
-	if err != nil {
-		return false
-	}
-	st, err := os.Lstat(platform.LongPath(full))
-	if err != nil || st.IsDir() {
-		return false
-	}
-	return st.ModTime().After(stop)
-}
-
-func dirHasNewerFile(root, rel string, stop time.Time) bool {
-	full, err := platform.SafeRel(root, strings.TrimSuffix(rel, "/"))
-	if err != nil {
-		return false
-	}
-	found := false
-	_ = filepath.WalkDir(platform.LongPath(full), func(path string, d os.DirEntry, err error) error {
-		if found {
-			return fs.SkipAll
-		}
-		if err != nil || d.IsDir() {
-			return nil
-		}
-		info, ierr := d.Info()
-		if ierr != nil {
-			return nil
-		}
-		if info.ModTime().After(stop) {
-			found = true
-			return fs.SkipAll
-		}
-		return nil
-	})
-	return found
 }
 
 func changePaths(changes []snapshot.Change) []string {

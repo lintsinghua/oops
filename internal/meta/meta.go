@@ -207,14 +207,16 @@ type Turn struct {
 
 // Stats is the stored change summary.
 type Stats struct {
-	Files      int   `json:"files"`
-	Added      int   `json:"added"`
-	Modified   int   `json:"modified"`
-	Deleted    int   `json:"deleted"`
-	Insertions int   `json:"insertions"`
-	Deletions  int   `json:"deletions"`
-	ClosedLate bool  `json:"closed_late,omitempty"`
-	Overlaps   []int `json:"overlaps,omitempty"`
+	Files      int       `json:"files"`
+	Added      int       `json:"added"`
+	Modified   int       `json:"modified"`
+	Deleted    int       `json:"deleted"`
+	Insertions int       `json:"insertions"`
+	Deletions  int       `json:"deletions"`
+	ClosedLate bool      `json:"closed_late,omitempty"`
+	Overlaps   []int     `json:"overlaps,omitempty"`
+	Kept       []string  `json:"kept,omitempty"`
+	SnapDone   time.Time `json:"snap_done,omitempty"`
 }
 
 // InsertTurn allocates the next sequence number and inserts a running turn.

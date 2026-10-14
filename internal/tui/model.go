@@ -418,7 +418,7 @@ func (m Model) body() string {
 	// One full-width row, blank until a toast arrives, so the list does not jump.
 	head = append(head, m.noticeLine())
 	foot = append(foot, rule)
-	foot = append(foot, m.styles.Muted.Render("  ↑↓ select   enter undo   d diff   r rewind to here   R redo   / filter   ? help   q quit"))
+	foot = append(foot, m.styles.Muted.Render(fitFooter(width)))
 	if m.filtering {
 		foot = append(foot, "  filter: "+m.filter)
 	}
@@ -537,7 +537,7 @@ func (m Model) renderList(rows []Row, highlight, lineW, markW, paneW int) []stri
 				mark += strings.Repeat(" ", pad)
 			}
 		}
-		line := padDisplay(mark+m.line(r, listLineWidth(lineW, markW)), paneW)
+		line := padDisplay(mark+m.line(r, listLineWidth(lineW, markW), statusWidth(rows)), paneW)
 		if i == highlight && !r.Gap {
 			line = m.styles.Select.Render(line)
 		} else if r.Gap || r.Status == "undone" {
@@ -553,23 +553,26 @@ const (
 	statusColWidth = 7
 )
 
-func (m Model) line(r Row, width int) string {
-	tailW := fileColWidth + statusColWidth
+func (m Model) line(r Row, width, statusW int) string {
+	if statusW < statusColWidth {
+		statusW = statusColWidth
+	}
+	tailW := fileColWidth + statusW
 	if r.Gap {
 		s := fmt.Sprintf(" %s    %-7s %-11s %s", m.sym.Gap, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11), r.Prompt)
 		room := width - tailW
 		if room < 1 {
 			return ui.Truncate(s, max(1, width))
 		}
-		return padDisplay(ui.Truncate(s, room), room) + rightCol("", fileColWidth) + rightCol("", statusColWidth)
+		return padDisplay(ui.Truncate(s, room), room) + rightCol("", fileColWidth) + rightCol("", statusW)
 	}
 	prefix := fmt.Sprintf(" #%-4d %-7s %-11s ", r.Seq, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11))
 	file := rightCol(ui.Plural(r.Files, "file", "files"), fileColWidth)
-	statusText := ""
-	if r.Status == "running" || r.Status == "undone" {
-		statusText = r.Status
+	statusText := rowStatus(r.Status)
+	if ui.DisplayWidth(statusText) > statusW {
+		statusText = ui.Truncate(statusText, statusW)
 	}
-	status := rightCol(statusText, statusColWidth)
+	status := rightCol(statusText, statusW)
 	tail := file + status
 	promptWidth := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(tail)
 	if promptWidth < 0 {
@@ -697,18 +700,71 @@ func paneWidths(width int) (left, right int, stacked bool) {
 		return width, 0, true
 	}
 	const (
-		sep       = 3
-		listFixed = 2 + 27 + 7 + 2 // mark, prefix, " 1 file", quotes
-		minPrompt = 72
+		sep        = 3
+		mark       = 2
+		prefix     = 27
+		quotes     = 2
+		minPrompt  = 72
+		longPrompt = 96
+		minPreview = 28
+		maxPreview = 42
 	)
-	right = 34
-	if width >= 160 {
-		right = 42
-	}
-	if width-right-sep-listFixed < minPrompt {
+	fixed := mark + prefix + fileColWidth + statusColWidth + quotes
+	if width-sep-minPreview-fixed < minPrompt {
 		return width, 0, true
 	}
+	// The preview stays narrow until the prompt has a long column. Extra
+	// width goes to the prompt first, then to the preview.
+	right = minPreview
+	promptText := width - sep - right - fixed
+	if promptText > longPrompt {
+		grow := promptText - longPrompt
+		if minPreview+grow > maxPreview {
+			grow = maxPreview - minPreview
+		}
+		right = minPreview + grow
+	}
 	return width - right - sep, right, false
+}
+
+// fitFooter keeps ? help and q quit, and drops lower-priority hints until the
+// line fits. The drop order is rewind, filter, diff, redo, enter, then select.
+func fitFooter(width int) string {
+	optional := []string{"↑↓ select", "enter undo", "R redo", "d diff", "/ filter", "r rewind to here"}
+	required := []string{"? help", "q quit"}
+	for {
+		parts := append(append([]string{}, optional...), required...)
+		line := "  " + strings.Join(parts, "   ")
+		if width < 1 || ui.DisplayWidth(line) <= width || len(optional) == 0 {
+			if width > 0 && ui.DisplayWidth(line) > width {
+				return ui.Truncate(line, width)
+			}
+			return line
+		}
+		optional = optional[:len(optional)-1]
+	}
+}
+
+func statusWidth(rows []Row) int {
+	w := statusColWidth
+	for _, r := range rows {
+		if n := ui.DisplayWidth(rowStatus(r.Status)); n > w {
+			w = n
+		}
+	}
+	if w > 24 {
+		return 24
+	}
+	return w
+}
+
+func rowStatus(status string) string {
+	switch status {
+	case "", "done", "partial":
+		return ""
+	default:
+		return status
+	}
 }
 
 func previewLines(preview string, width int) []string {

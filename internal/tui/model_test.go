@@ -419,6 +419,57 @@ func TestPreviewPathsTruncateSeparately(t *testing.T) {
 	}
 }
 
+func TestFooterKeepsHelpAndQuit(t *testing.T) {
+	m := New(sampleRows(), "proj", "", false, true)
+	m.Width = 80
+	m.Height = 24
+	lines := strings.Split(m.View(), "\n")
+	last := lines[len(lines)-1]
+	if !strings.Contains(last, "? help") || !strings.Contains(last, "q quit") {
+		t.Fatalf("footer %q", last)
+	}
+	if ui.DisplayWidth(last) > 80 {
+		t.Fatalf("footer width %d %q", ui.DisplayWidth(last), last)
+	}
+	if strings.Contains(last, "rewind") {
+		t.Fatalf("low-priority hint kept: %q", last)
+	}
+}
+
+func TestPromptUsesRemainingWidthAt175(t *testing.T) {
+	prompt := strings.Repeat("p", 95)
+	rows := []Row{{
+		Seq: 2, Agent: "claude", When: "1 min ago", Prompt: prompt, Files: 1, Status: "done",
+		Preview: "  Undo #2 would:\n",
+	}}
+	m := New(rows, "proj", "", false, true)
+	m.Width = 175
+	m.Height = 30
+	view := m.View()
+	if !strings.Contains(view, `"`+prompt+`"`) {
+		t.Fatalf("prompt cut:\n%s", view)
+	}
+	if !strings.Contains(view, "1 file") {
+		t.Fatalf("count:\n%s", view)
+	}
+}
+
+func TestKeptFileShowsInStatus(t *testing.T) {
+	rows := []Row{{
+		Seq: 2, Agent: "claude", When: "1 min ago", Prompt: "edit readme", Files: 1, Status: "README.md",
+		Preview: "  #2 kept README.md.\n",
+	}}
+	m := New(rows, "proj", "", false, true)
+	m.Width = 120
+	m.Height = 24
+	m.notice = "Undid #2, except README.md"
+	m.noticeOK = false
+	view := m.View()
+	if !strings.Contains(view, "Undid #2, except README.md") || !strings.Contains(view, "README.md") {
+		t.Fatalf("toast or status:\n%s", view)
+	}
+}
+
 func TestTimelineColumnsRightAlign(t *testing.T) {
 	long := strings.Repeat("p", 90)
 	rows := []Row{
