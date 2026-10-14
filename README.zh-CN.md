@@ -35,7 +35,7 @@
 </p>
 
 ```sh
-go install github.com/lintsinghua/oops/cmd/oops@latest
+curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
 oops init                         # 一次接好本机所有 Agent，之后就不用管了
 ```
 
@@ -57,12 +57,95 @@ oops 工作在更底层的文件系统。不管 Agent 用的是自带的 Edit �
 
 ## 安装
 
-| | |
-|---|---|
-| Go | `go install github.com/lintsinghua/oops/cmd/oops@latest` |
-| Releases | [GitHub Releases](https://github.com/lintsinghua/oops/releases)：macOS、Linux、Windows · amd64 / arm64 |
+三种新方式和 `go install` 装完后，最后一行都是同一步：`oops init`。
 
-Homebrew、npm 和安装脚本即将提供。
+### 脚本
+
+优先用这个。它从 [GitHub Releases](https://github.com/lintsinghua/oops/releases) 下载本机对应的压缩包（macOS、Linux、Windows · amd64 / arm64），用 `checksums.txt` 核对 SHA-256，再把二进制装到 `~/.local/bin`。校验失败时以非零状态退出，不会覆盖已经装好的文件。不需要 sudo。
+
+macOS 和 Linux：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
+```
+
+Windows（PowerShell）：
+
+```powershell
+irm https://raw.githubusercontent.com/lintsinghua/oops/main/install.ps1 | iex
+```
+
+`OOPS_VERSION` 指定版本（`0.1.0` 或 `v0.1.0`，默认最新 release）。`OOPS_INSTALL_DIR` 改安装目录。目录不在 `PATH` 里时，脚本会打印一行可以加进去的命令。再跑一次就是升级，并打印 `upgraded from X to Y`。
+
+卸载：
+
+```sh
+oops init --undo
+oops gc --all --global
+rm -f "${OOPS_INSTALL_DIR:-$HOME/.local/bin}/oops"
+```
+
+Windows（PowerShell）：
+
+```powershell
+oops init --undo
+oops gc --all --global
+Remove-Item -Force "$env:USERPROFILE\.local\bin\oops.exe"
+```
+
+### Homebrew
+
+```sh
+brew install lintsinghua/tap/oops
+```
+
+打 tag 发布时，GoReleaser 用 `HOMEBREW_TAP_TOKEN` 把 formula 推到 `lintsinghua/homebrew-tap`。这个 tap 仓库需要事先建好，本仓库不会创建它。
+
+卸载：
+
+```sh
+oops init --undo
+oops gc --all --global
+brew uninstall oops
+```
+
+### npm
+
+npm 上的包名 `oops` 已被占用，所以这里发布的是 `@lintsinghua/oops`。
+
+```sh
+npm i -g @lintsinghua/oops
+```
+
+`npx` 同样可用：
+
+```sh
+npx @lintsinghua/oops
+```
+
+主包通过 optionalDependencies 带上每个平台一个包（例如 `@lintsinghua/oops-linux-x64`），包里直接放二进制，并写好 `os` 和 `cpu`。npm 只会装上匹配的那一个。postinstall 不会再下载文件。发布工作流用 `NPM_TOKEN` 推到 registry。
+
+卸载：
+
+```sh
+oops init --undo
+oops gc --all --global
+npm uninstall -g @lintsinghua/oops
+```
+
+### Go
+
+```sh
+go install github.com/lintsinghua/oops/cmd/oops@latest
+```
+
+卸载：
+
+```sh
+oops init --undo
+oops gc --all --global
+rm -f "$(go env GOPATH)/bin/oops"
+```
 
 ## 30 秒上手
 
@@ -270,7 +353,7 @@ CI 在 Linux、macOS、Windows 上跑同一条 `go test -race ./...`，其中包
 <details>
 <summary><strong>怎么卸载？</strong></summary>
 
-`oops init --undo` 移除 hooks（其他设置不受影响），`oops gc --all --global` 删除所有快照，然后删除 `$(go env GOPATH)/bin/oops`。
+`oops init --undo` 移除 hooks（其他设置不受影响），`oops gc --all --global` 删除所有快照。然后按[安装](#安装)一节里你所用方式的命令删掉二进制。
 </details>
 
 ## 参与贡献

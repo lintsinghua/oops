@@ -110,4 +110,4 @@ Claude Code's `SubagentStop` hook is installed. It is logged and does not open o
 
 `oops version` prints the version, commit, and date compiled into the binary. `oops version --check` is the only network call: it GETs `https://api.github.com/repos/lintsinghua/oops/releases/latest`. A 404 prints `no release published`.
 
-Release archives are tar.gz (zip on Windows) plus `checksums.txt` (sha256). `go install github.com/lintsinghua/oops/cmd/oops@latest` and [GitHub Releases](https://github.com/lintsinghua/oops/releases) are the install paths that exist today. Homebrew, npm, and a curl install script are planned.
+Release archives are tar.gz (zip on Windows) plus `checksums.txt` (sha256). Install with `install.sh` / `install.ps1` (they verify that checksum), `brew install lintsinghua/tap/oops`, `npm i -g @lintsinghua/oops`, or `go install github.com/lintsinghua/oops/cmd/oops@latest`.

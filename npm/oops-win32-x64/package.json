@@ -1,0 +1,17 @@
+{
+  "name": "@lintsinghua/oops-win32-x64",
+  "version": "0.1.0",
+  "description": "win32 x64 binary for @lintsinghua/oops.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lintsinghua/oops.git",
+    "directory": "npm/oops-win32-x64"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"],
+  "files": ["bin/oops.exe"],
+  "publishConfig": {
+    "access": "public"
+  }
+}

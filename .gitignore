@@ -1,6 +1,8 @@
 # Binaries and release artifacts
-bin/
+/bin/
 dist/
+npm/oops-*/bin/
+node_modules/
 *.exe
 *.exe~
 *.dll
