@@ -105,14 +105,15 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-28 narrow footer keeps help and quit | PASS | `TestFooterKeepsHelpAndQuit` | At 80×24 the footer shows `? help` and `q quit` and drops the rewind hint |
 | DEMO-29 wide prompt uses the leftover width | PASS | `TestPromptUsesRemainingWidthAt175` | At 175 columns a 95-character prompt is shown in full beside the right-aligned file count |
 | DEMO-30 partial row marker stays in its column | PASS | `TestKeptFileShowsInStatus` | After a partial undo the row is `9 files` then `partial`, with a gap. The path is not concatenated onto the count |
-| DEMO-31 partial undo preview is the redo preview | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | The preview says the turn is undone (partial), lists the kept file, and shows `Redo #N would re-apply:` |
+| DEMO-31 partial undo preview is the redo preview | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | The preview says the turn is undone (partial) and `Redo #N would re-apply:`. The lines are the redo plan, so a kept file is `keep 1 file (yours)` and the other files are `add 8 files` |
 | DEMO-32 partial redo toast names the file | PASS | `TestRedoNoticeNamesKeptFile`, `TestPartialRedoToastMatchesCLI` | The timeline toast is `! Redid the last change, except 1 file you changed afterwards` and names the file |
+| DEMO-33 preview counts match the applied plan | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | Undo and redo previews, and the confirm card, use the plan Undo and Redo apply. The preview counts equal the applied result: `remove 8 files, keep 1 file (yours)` then `add 8 files, keep 1 file (yours)` |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 103 |
+| PASS | 104 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action

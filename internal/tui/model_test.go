@@ -457,7 +457,8 @@ func TestPromptUsesRemainingWidthAt175(t *testing.T) {
 func TestKeptFileShowsInStatus(t *testing.T) {
 	rows := []Row{{
 		Seq: 3, Agent: "claude", When: "1 min ago", Prompt: "edit readme", Files: 9, Status: "kept",
-		Preview: "  #3 is undone (partial).\n  Kept 1 file\n    pkg/m1.go\n  Redo #3 would re-apply:\n\n    add  9 files\n      pkg/m1.go\n",
+		Plan:    "add 8 files, keep 1 file (yours)",
+		Preview: "  #3 is undone (partial).\n  Redo #3 would re-apply:\n\n    add      8 files\n      pkg/m2.go\n    keep     1 file (yours)\n      pkg/m1.go\n",
 	}}
 	m := New(rows, "proj", "", false, true)
 	m.Width = 120
@@ -489,6 +490,9 @@ func TestKeptFileShowsInStatus(t *testing.T) {
 	got := model.(Model)
 	if got.pending != "redo" || !strings.Contains(got.View(), "Redo turn #3?") {
 		t.Fatalf("pending %q\n%s", got.pending, got.View())
+	}
+	if !strings.Contains(got.View(), "add 8 files, keep 1 file (yours)") {
+		t.Fatalf("confirm card:\n%s", got.View())
 	}
 }
 
