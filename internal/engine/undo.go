@@ -3,10 +3,14 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/lintsinghua/oops/internal/meta"
+	"github.com/lintsinghua/oops/internal/platform"
 	"github.com/lintsinghua/oops/internal/restore"
 	"github.com/lintsinghua/oops/internal/snapshot"
 )
@@ -94,6 +98,9 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 		return UndoResult{}, err
 	}
 	items := restore.Plan(paths, post, pre, curRes.Files, req.Force)
+	if !req.Force {
+		preserveAfterStop(req.Workspace.Path, items, t.EndedAt)
+	}
 	res := UndoResult{Turn: t, Result: resultOf(items), DryRun: req.DryRun, Seqs: []int{t.Seq}}
 	res.Effects = effects(items)
 	if req.DryRun {
@@ -207,6 +214,9 @@ func (e *Engine) Rewind(ctx context.Context, ws Workspace, seq int, force, dry b
 		return UndoResult{}, err
 	}
 	items := restore.Plan(paths, expected, pre, curRes.Files, force)
+	if !force {
+		preserveAfterStop(ws.Path, items, latestStop(turns))
+	}
 	var seqs []int
 	for _, t := range turns {
 		seqs = append(seqs, t.Seq)
@@ -551,6 +561,88 @@ func (e *Engine) recordJournalOp(j restore.Journal) error {
 		}
 	}
 	return nil
+}
+
+func latestStop(turns []meta.Turn) time.Time {
+	var stop time.Time
+	for _, t := range turns {
+		if t.EndedAt.After(stop) {
+			stop = t.EndedAt
+		}
+	}
+	return stop
+}
+
+// preserveAfterStop keeps any file whose mtime is later than Stop.
+// The post snapshot can still contain that write when the edit landed during
+// the scan. A directory removal is kept when a file inside it is newer, so
+// undo does not delete a user file by removing its parent. Equal mtimes are
+// not later. --force skips this pass.
+func preserveAfterStop(root string, items []restore.Item, stop time.Time) {
+	if stop.IsZero() {
+		return
+	}
+	for i := range items {
+		it := &items[i]
+		switch it.Op {
+		case "skip", "kept", "unprotected":
+			continue
+		}
+		newer := false
+		if planIsDir(*it) {
+			if it.Op == "remove" {
+				newer = dirHasNewerFile(root, it.Path, stop)
+			}
+		} else {
+			newer = fileNewerThan(root, it.Path, stop)
+		}
+		if newer {
+			it.Op = "kept"
+			it.Reason = "changed_after_turn"
+		}
+	}
+}
+
+func planIsDir(it restore.Item) bool {
+	return metaIsDir(it.Want) || metaIsDir(it.Before) || strings.HasSuffix(it.Path, "/")
+}
+
+func fileNewerThan(root, rel string, stop time.Time) bool {
+	full, err := platform.SafeRel(root, strings.TrimSuffix(rel, "/"))
+	if err != nil {
+		return false
+	}
+	st, err := os.Lstat(platform.LongPath(full))
+	if err != nil || st.IsDir() {
+		return false
+	}
+	return st.ModTime().After(stop)
+}
+
+func dirHasNewerFile(root, rel string, stop time.Time) bool {
+	full, err := platform.SafeRel(root, strings.TrimSuffix(rel, "/"))
+	if err != nil {
+		return false
+	}
+	found := false
+	_ = filepath.WalkDir(platform.LongPath(full), func(path string, d os.DirEntry, err error) error {
+		if found {
+			return fs.SkipAll
+		}
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		info, ierr := d.Info()
+		if ierr != nil {
+			return nil
+		}
+		if info.ModTime().After(stop) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
 }
 
 func changePaths(changes []snapshot.Change) []string {

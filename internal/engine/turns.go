@@ -149,7 +149,14 @@ func (e *Engine) finish(ctx context.Context, ws Workspace, t meta.Turn, late boo
 	} else {
 		t.Status = "done"
 	}
-	t.EndedAt = e.Now
+	// Stop already recorded a wall-clock EndedAt. Keep it. A logical clock
+	// (e.Now) is not comparable with filesystem mtimes.
+	if t.EndedAt.IsZero() && gerr == nil {
+		t.EndedAt = cur.EndedAt
+	}
+	if t.EndedAt.IsZero() {
+		t.EndedAt = e.Now
+	}
 	t.PostSnap = snap.ID
 	t.Stats = stats
 	if err := e.DB.UpdateTurn(t); err != nil {

@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// spawnFinish starts a detached process that takes queued post-snapshots
-// and then runs retention. It returns false when this process must do the
-// work itself (tests, or when the child cannot be started).
+// spawnFinish starts a detached process that runs retention. The post
+// snapshot is already stored by the caller. It returns false when no child
+// is started (tests, or when the child cannot be started).
 func spawnFinish(home string) bool {
 	if home == "" || os.Getenv("OOPS_NO_MAINTAIN") == "1" {
 		return false

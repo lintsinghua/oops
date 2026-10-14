@@ -26,13 +26,15 @@ func (e *Engine) pendingDir(id string) string {
 // QueueFinish records that the running turn still needs its post snapshot.
 // Before it returns it marks the turn ended in the database, so a command
 // that starts after the hook returns does not see a still-running turn.
-// The caller can return immediately and let finish-pending take the snapshot.
+// EndedAt is the wall-clock Stop time, taken before the scan, so undo can
+// tell a later user edit from the agent's own writes. The hook stores the
+// snapshot before it returns; this mark is what remains if that scan is killed.
 func (e *Engine) QueueFinish(ws Workspace, session string, late bool) error {
 	t, err := e.runningTurn(ws, session)
 	if err != nil {
 		return err
 	}
-	if err := e.DB.MarkTurnPending(t.ID, e.Now); err != nil {
+	if err := e.DB.MarkTurnPending(t.ID, time.Now()); err != nil {
 		return err
 	}
 	dir := e.pendingDir(ws.ID)

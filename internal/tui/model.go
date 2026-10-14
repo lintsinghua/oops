@@ -40,6 +40,7 @@ type refreshedMsg struct {
 	rows   []Row
 	notice string
 	err    error
+	seq    int
 }
 
 // Model is the timeline.
@@ -89,6 +90,17 @@ func firstSelectable(rows []Row) int {
 	return 0
 }
 
+func cursorForSeq(rows []Row, seq int) int {
+	if seq > 0 {
+		for i, r := range rows {
+			if !r.Gap && r.Seq == seq {
+				return i
+			}
+		}
+	}
+	return firstSelectable(rows)
+}
+
 // Action returns a confirmed command, or a zero action when the user quit.
 func (m Model) Action() Action { return m.action }
 
@@ -112,7 +124,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.rows != nil {
 			m.Rows = msg.rows
-			m.cursor = firstSelectable(m.visible())
+			m.cursor = cursorForSeq(m.visible(), msg.seq)
 			m.fileIdx = 0
 		}
 		return m, nil
@@ -241,11 +253,15 @@ func (m Model) key(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.yes = true
 		}
 	case "R":
+		seq := 0
+		if row, ok := m.selected(); ok {
+			seq = row.Seq
+		}
 		if m.Apply == nil {
-			m.action = Action{Kind: "redo"}
+			m.action = Action{Kind: "redo", Seq: seq}
 			return m, tea.Quit
 		}
-		return m, m.runApply(Action{Kind: "redo"})
+		return m, m.runApply(Action{Kind: "redo", Seq: seq})
 	case "/":
 		m.filtering = true
 	case "?":
@@ -281,9 +297,10 @@ func (m Model) confirmDo() (tea.Model, tea.Cmd) {
 
 func (m Model) runApply(action Action) tea.Cmd {
 	apply := m.Apply
+	seq := action.Seq
 	return func() tea.Msg {
 		rows, notice, err := apply(action)
-		return refreshedMsg{rows: rows, notice: notice, err: err}
+		return refreshedMsg{rows: rows, notice: notice, err: err, seq: seq}
 	}
 }
 
@@ -388,13 +405,16 @@ func (m Model) body() string {
 		b.WriteString(m.styles.Bold.Render(" oops") + "  " + m.Header + "\n")
 		b.WriteString(m.styles.Muted.Render(strings.Repeat("─", max(8, m.Width))) + "\n")
 	}
+	// One reserved row, blank until a toast arrives, so the list does not jump.
+	notice := " "
 	if m.notice != "" {
 		if m.noticeOK {
-			b.WriteString(m.styles.Success.Render("  "+m.sym.OK+" "+m.notice) + "\n")
+			notice = m.styles.Success.Render("  " + m.sym.OK + " " + m.notice)
 		} else {
-			b.WriteString(m.styles.Warning.Render("  "+m.sym.Warn+" "+m.notice) + "\n")
+			notice = m.styles.Warning.Render("  " + m.sym.Warn + " " + m.notice)
 		}
 	}
+	b.WriteString(notice + "\n")
 	vis := m.visible()
 	leftW, rightW, narrow := paneWidths(m.Width)
 	var left, right strings.Builder
@@ -441,8 +461,14 @@ func (m Model) line(r Row, width int) string {
 	prefix := fmt.Sprintf(" #%-4d %-7s %-11s ", r.Seq, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11))
 	suffix := " " + files + status
 	prompt := ""
-	if r.Prompt != "" {
-		inner := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(suffix) - 2
+	remain := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(suffix)
+	if r.Prompt != "" && remain > 2 {
+		// The prompt column is whatever is left on this line. Quotes cost two
+		// columns, and an ellipsis costs one more when the text does not fit.
+		inner := remain - 2
+		if ui.DisplayWidth(r.Prompt) > inner && inner > 1 {
+			inner--
+		}
 		if inner < 1 {
 			inner = 1
 		}
@@ -454,7 +480,10 @@ func (m Model) line(r Row, width int) string {
 	}
 	s := prefix + prompt + suffix
 	if width > 0 && ui.DisplayWidth(s) > width {
-		return ui.Truncate(s, width)
+		s = prefix + suffix
+		if ui.DisplayWidth(s) > width {
+			return ui.Truncate(prefix, width)
+		}
 	}
 	return s
 }
@@ -463,12 +492,11 @@ func paneWidths(width int) (left, right int, narrow bool) {
 	if width < 80 {
 		return width, 0, true
 	}
-	right = width * 34 / 100
-	if right > 52 {
-		right = 52
-	}
-	if right < 30 {
-		right = 30
+	// The preview stays a compact column. The prompt takes the width that remains,
+	// including on a 120-column window, instead of a percentage that grows the preview.
+	right = 34
+	if width >= 160 {
+		right = 42
 	}
 	left = width - right - 3
 	if left < 48 {
@@ -487,9 +515,39 @@ func fitPreview(preview string, width int) string {
 		if i > 0 {
 			b.WriteByte('\n')
 		}
-		b.WriteString(ui.MiddleTruncate(line, width))
+		b.WriteString(fitPreviewLine(line, width))
 	}
 	return b.String()
+}
+
+// fitPreviewLine middle-truncates a path after the count label.
+// The count ("5 files") is never part of the truncated span.
+func fitPreviewLine(line string, width int) string {
+	if ui.DisplayWidth(line) <= width {
+		return line
+	}
+	label, path, ok := splitPreviewPath(line)
+	if !ok {
+		return ui.MiddleTruncate(line, width)
+	}
+	room := width - ui.DisplayWidth(label)
+	if room < 1 {
+		return label
+	}
+	return label + ui.MiddleTruncate(path, room)
+}
+
+func splitPreviewPath(line string) (label, path string, ok bool) {
+	i := strings.LastIndex(line, "   ")
+	if i < 0 {
+		return "", "", false
+	}
+	path = line[i+3:]
+	label = line[:i+3]
+	if path == "" || !strings.Contains(label, " file") {
+		return "", "", false
+	}
+	return label, path, true
 }
 
 func fileDiffs(row Row) []string {
