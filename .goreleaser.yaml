@@ -33,6 +33,7 @@ archives:
     files:
       - src: LICENSE
       - src: README.md
+      - src: README.en.md
 
 checksum:
   name_template: checksums.txt

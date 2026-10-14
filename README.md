@@ -6,8 +6,8 @@
 </p>
 
 <p align="center">
-  <strong>Ctrl+Z for Agent: precise undo & redo in one step.</strong><br>
-  Undo anything Claude Code, Codex, Gemini or Cursor did to your files. Even <code>rm -rf</code>.
+  <strong>Agent 的 Ctrl+Z：一键精准撤销/重做</strong><br>
+  Claude Code、Codex、Gemini、Cursor 对文件做的任何改动都能撤销，<code>rm -rf</code> 也不例外。
 </p>
 
 <p align="center">
@@ -19,65 +19,65 @@
 </p>
 
 <p align="center">
-  English · <a href="./README.zh-CN.md">简体中文</a>
+  <a href="./README.en.md">English</a> · 简体中文
 </p>
 
-> **Your agent just wrecked your project? Type `/oops` and jump back to before the conversation in one step.**
+> **Agent 改乱了你的项目？一句 /oops，一键回到对话前。**
 
-- **Whole-turn undo**: Agent changed 30 files in one turn? One command restores them all.
-- **Your edits stay safe**: oops tells the agent's changes apart from yours and undoes only the agent's.
-- **Change your mind anytime**: Undo and redo freely, back and forth through the full timeline.
-- **Never touches `.git`**: Independent snapshots. Your Git history stays exactly as it is.
-- **Works right inside your agent**: Hooks into Claude Code, Codex, Gemini CLI and Cursor CLI. No switching tools, just type `/oops` in the chat.
+- **整轮撤回**：Agent 一轮改了 30 个文件？一条命令，全部还原。
+- **你的改动不丢**：自动区分 Agent 与你的修改，只撤回 Agent 的部分。
+- **随时反悔**：撤回、重做都支持，完整时间线前后自由切换。
+- **不碰 .git**：独立快照，Git 历史一行不改。
+- **在 Agent 里直接用**：通过 hook 接入 Claude Code、Codex、Gemini CLI、Cursor CLI，无需切换工具，在对话中输入 /oops 即可撤回。
 
 <p align="center">
-  <img alt="Two scenes: undoing with /oops inside Claude Code, and undo and redo in the full timeline." src="assets/demo.gif" width="820">
+  <img alt="两个场景：在 Claude Code 里用 /oops 撤销，以及在完整时间线里撤销和重做。" src="assets/demo.gif" width="820">
 </p>
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
-oops init                         # connect your agents once — then forget about it
+oops init                         # 一次接好本机所有 Agent，之后就不用管了
 ```
 
 ---
 
-## Why oops
+## 为什么需要 oops
 
-Coding agents are now trusted to run shell commands on their own. Sometimes the command is `rm -rf`, `git clean -fdx`, or a `sed -i` across forty files, and the files it touches were never committed.
+编程 Agent 已经可以自己执行 shell 命令了。有时候那条命令是 `rm -rf`、`git clean -fdx`，或者对四十个文件跑一遍 `sed -i`，而被改的文件从来没提交过。
 
-The built-in safety nets don't cover this well:
+Agent 自带的保护网在这些场景下并不够用：
 
-- **Codex** had `/undo`, then removed it in April 2026 ([#8804](https://github.com/openai/codex/issues/8804), [PR #19481](https://github.com/openai/codex/pull/19481)). The request to bring it back, [openai/codex#9203](https://github.com/openai/codex/issues/9203) — *"Please make /undo back"* — is still open with 480 upvotes and 93 comments. The original report: Codex deleted files that weren't tracked by git and changed work that wasn't committed yet. A related request for `/rewind` ([#11626](https://github.com/openai/codex/issues/11626)) has 227 upvotes.
-- **Claude Code** checkpoints [don't track changes made through Bash](https://code.claude.com/docs/en/checkpointing) (`rm`, `mv`, `cp`), don't restore background subagent edits, and keep the last 100 checkpoints per session. In auto mode the agent often edits files through Bash, so `/rewind` can report success while restoring nothing ([anthropics/claude-code#87575](https://github.com/anthropics/claude-code/issues/87575)).
-- **Gemini CLI** checkpointing is off by default, snapshots only before `write_file` / `replace`, and `/restore` runs `git restore` + `git clean` on the whole shadow repo — which also wipes your own edits.
+- **Codex** 原本有 `/undo`，2026 年 4 月被移除（[#8804](https://github.com/openai/codex/issues/8804)、[PR #19481](https://github.com/openai/codex/pull/19481)）。要求恢复它的 [openai/codex#9203](https://github.com/openai/codex/issues/9203)“Please make /undo back”至今仍是 open 状态，有 480 个赞、93 条评论。原帖的场景是：Codex 误删了没进 git 的文件，误改了还没提交的内容。相关的 `/rewind` 需求（[#11626](https://github.com/openai/codex/issues/11626)）也有 227 个赞。
+- **Claude Code** 的检查点[不追踪通过 Bash 做的修改](https://code.claude.com/docs/en/checkpointing)（`rm`、`mv`、`cp`），不恢复后台 subagent 的编辑，每个会话只保留最近 100 个检查点。auto mode 下 Agent 经常用 Bash 改文件，于是 `/rewind` 可能报告成功、实际什么都没恢复（[anthropics/claude-code#87575](https://github.com/anthropics/claude-code/issues/87575)）。
+- **Gemini CLI** 的检查点默认关闭，只在 `write_file` / `replace` 之前快照；`/restore` 会对整个影子仓库执行 `git restore` 加 `git clean`，连你自己的改动也一起冲掉。
 
-<sub>Issue counts as of 2026-10-14.</sub>
+<sub>issue 数据截至 2026-10-14。</sub>
 
-oops works one level lower, at the file system. Whatever the agent used — its Edit tool, `sed`, a Python heredoc, `rm -rf` — and whether or not the file is in git, the turn can be undone.
+oops 工作在更底层的文件系统。不管 Agent 用的是自带的 Edit 工具、`sed`、Python heredoc 还是 `rm -rf`，也不管文件有没有进 git，这一轮都能撤回。
 
-## Install
+## 安装
 
-Each method checks the download, installs without sudo, and prints the same next step: `oops init`.
+三种新方式和 `go install` 装完后，最后一行都是同一步：`oops init`。
 
-### Script
+### 脚本
 
-This is the one to use. It downloads the matching [GitHub Release](https://github.com/lintsinghua/oops/releases) archive (macOS, Linux, Windows · amd64 / arm64), checks its SHA-256 against `checksums.txt`, and installs the binary to `~/.local/bin`. A checksum mismatch exits non-zero and leaves the previous binary in place.
+优先用这个。它从 [GitHub Releases](https://github.com/lintsinghua/oops/releases) 下载本机对应的压缩包（macOS、Linux、Windows · amd64 / arm64），用 `checksums.txt` 核对 SHA-256，再把二进制装到 `~/.local/bin`。校验失败时以非零状态退出，不会覆盖已经装好的文件。不需要 sudo。
 
-macOS and Linux:
+macOS 和 Linux：
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
 ```
 
-Windows (PowerShell):
+Windows（PowerShell）：
 
 ```powershell
 irm https://raw.githubusercontent.com/lintsinghua/oops/main/install.ps1 | iex
 ```
 
-`OOPS_VERSION` selects a release (`0.1.0` or `v0.1.0`; the default is the latest release). `OOPS_INSTALL_DIR` changes the destination. If that directory is not on `PATH`, the script prints a one-line command to add it. Running the script again upgrades in place and prints `upgraded from X to Y`.
+`OOPS_VERSION` 指定版本（`0.1.0` 或 `v0.1.0`，默认最新 release）。`OOPS_INSTALL_DIR` 改安装目录。目录不在 `PATH` 里时，脚本会打印一行可以加进去的命令。再跑一次就是升级，并打印 `upgraded from X to Y`。
 
-Uninstall:
+卸载：
 
 ```sh
 oops init --undo
@@ -85,7 +85,7 @@ oops gc --all --global
 rm -f "${OOPS_INSTALL_DIR:-$HOME/.local/bin}/oops"
 ```
 
-Windows (PowerShell):
+Windows（PowerShell）：
 
 ```powershell
 oops init --undo
@@ -99,9 +99,9 @@ Remove-Item -Force "$env:USERPROFILE\.local\bin\oops.exe"
 brew install lintsinghua/tap/oops
 ```
 
-A tagged release pushes the formula to `lintsinghua/homebrew-tap` with GoReleaser (`HOMEBREW_TAP_TOKEN`). That tap repository has to exist before the first release; this repo does not create it.
+打 tag 发布时，GoReleaser 用 `HOMEBREW_TAP_TOKEN` 把 formula 推到 `lintsinghua/homebrew-tap`。这个 tap 仓库需要事先建好，本仓库不会创建它。
 
-Uninstall:
+卸载：
 
 ```sh
 oops init --undo
@@ -111,21 +111,21 @@ brew uninstall oops
 
 ### npm
 
-The npm name `oops` is already registered, so the package is `@lintsinghua/oops`.
+npm 上的包名 `oops` 已被占用，所以这里发布的是 `@lintsinghua/oops`。
 
 ```sh
 npm i -g @lintsinghua/oops
 ```
 
-`npx` works the same way:
+`npx` 同样可用：
 
 ```sh
 npx @lintsinghua/oops
 ```
 
-The wrapper depends on one optional package per platform (`@lintsinghua/oops-linux-x64` and the other os/cpu builds). Each of those packages carries the binary, with `os` and `cpu` set. npm installs the match. Nothing is downloaded from a postinstall script. The release workflow publishes the packages with `NPM_TOKEN`.
+主包通过 optionalDependencies 带上每个平台一个包（例如 `@lintsinghua/oops-linux-x64`），包里直接放二进制，并写好 `os` 和 `cpu`。npm 只会装上匹配的那一个。postinstall 不会再下载文件。发布工作流用 `NPM_TOKEN` 推到 registry。
 
-Uninstall:
+卸载：
 
 ```sh
 oops init --undo
@@ -139,7 +139,7 @@ npm uninstall -g @lintsinghua/oops
 go install github.com/lintsinghua/oops/cmd/oops@latest
 ```
 
-Uninstall:
+卸载：
 
 ```sh
 oops init --undo
@@ -147,7 +147,7 @@ oops gc --all --global
 rm -f "$(go env GOPATH)/bin/oops"
 ```
 
-## 30-second start
+## 30 秒上手
 
 ```console
 $ oops init
@@ -170,15 +170,15 @@ $ oops init
   When an agent breaks something, just type: oops
 ```
 
-That's it. Keep working as usual — oops prints nothing while it works.
+就这样。之后照常工作，oops 运行时不会输出任何东西。
 
-When something goes wrong, type one word:
+出事的时候，只需要敲一个词：
 
 ```console
 $ oops
 ```
 
-A timeline opens. The latest turn is selected and the right side shows what undoing it would do. Press <kbd>Enter</kbd>, confirm, done.
+时间线随即打开，默认选中最近一轮，右侧预览撤销后会发生什么。按 <kbd>Enter</kbd>，确认，完成。
 
 ```console
 $ oops undo
@@ -191,177 +191,177 @@ $ oops undo
   Changed your mind? oops redo
 ```
 
-Inside Claude Code you can also type `/oops` — it runs locally and never reaches the model, so it costs no tokens. Claude Code shows that reply as a hook decision titled "operation blocked by hook". The line that starts with `✓ oops` is the result.
+在 Claude Code 里也可以直接输入 `/oops`。它在本地执行，不会发给模型，不消耗 token。Claude Code 会把这段回复显示成 hook 拦截（“operation blocked by hook”）。以 `✓ oops` 开头的那一行是结果，不是报错。
 
-Changed your mind about the setup? `oops init --undo` removes exactly what oops added and leaves the rest of your config alone.
+不想用了？`oops init --undo` 只移除 oops 自己写入的配置，其他设置一行不动。
 
-## Commands
+## 命令
 
-You only need to remember `oops`. The rest are shortcuts for people who know what they want, and for scripts.
+你只需要记住 `oops`。其余命令是给熟练用户和脚本用的快捷方式。
 
-| Command | What it does |
+| 命令 | 作用 |
 |---|---|
-| `oops` | Open the timeline: pick a turn, preview, undo |
-| `oops undo [turn]` | Undo the last turn, or a specific one. `--file <path>` for just some files |
-| `oops rewind <turn>` | Go back to before a turn (undoes it and everything after) |
-| `oops redo` | Reverse the last undo, rewind or restore |
-| `oops restore <path>… --at <turn>` | Bring back files as they were before a turn |
-| `oops list` | List recent turns: agent, time, prompt, files changed |
-| `oops show [turn]` | Show what a turn changed |
-| `oops diff [turn]` | Show a turn's diff (`--stat`, `--name-only`, `--reverse`) |
-| `oops init` | Connect oops to the agents on this machine (`--project`, `--print`, `--undo`) |
-| `oops run -- <cmd>` | Protect any tool that has no hooks |
-| `oops snap [-m msg]` | Save a checkpoint now |
-| `oops doctor` | Check that everything works |
-| `oops gc` | Free up snapshot storage |
+| `oops` | 打开时间线：选中一轮 → 预览 → 撤销 |
+| `oops undo [turn]` | 撤销最近一轮或指定的一轮；`--file <path>` 只撤销部分文件 |
+| `oops rewind <turn>` | 回到某一轮开始之前（撤销该轮及之后的所有轮） |
+| `oops redo` | 撤回最近一次 undo、rewind 或 restore |
+| `oops restore <path>… --at <turn>` | 取回某一轮开始之前的文件版本 |
+| `oops list` | 最近的轮：Agent、时间、prompt 摘要、改动文件数 |
+| `oops show [turn]` | 查看某一轮改了什么 |
+| `oops diff [turn]` | 查看某一轮的 diff（`--stat`、`--name-only`、`--reverse`） |
+| `oops init` | 接入本机的 Agent（`--project`、`--print`、`--undo`） |
+| `oops run -- <cmd>` | 保护任何没有 hooks 的工具 |
+| `oops snap [-m msg]` | 立即保存一个检查点 |
+| `oops doctor` | 检查一切是否正常 |
+| `oops gc` | 回收快照占用的空间 |
 
-`undo`, `rewind`, `redo`, `restore`, `snap`, and `gc` accept `-n/--dry-run`. `list`, `show`, `diff`, `undo -n`, `doctor`, `snap`, and `gc` accept `--json` (with a `schema_version`). `show --json` includes the file list. Exit codes: `0` ok · `1` error · `2` needs confirmation · `3` partial (conflicting files kept) · `4` nothing to act on · `130` interrupted. The shapes are in [docs/schema.md](docs/schema.md).
+`undo`、`rewind`、`redo`、`restore`、`snap`、`gc` 支持 `-n/--dry-run`。`list`、`show`、`diff`、`undo -n`、`doctor`、`snap`、`gc` 支持 `--json`（带 `schema_version`）。`show --json` 包含文件列表。退出码：`0` 成功 · `1` 错误 · `2` 需要确认 · `3` 部分完成（冲突文件被保留）· `4` 没有可操作的目标 · `130` 被中断。字段见 [docs/schema.md](docs/schema.md)。
 
-## Supported agents
+## 支持的 Agent
 
-| Agent | Connects through | Turn = | In-session | Notes |
+| Agent | 接入方式 | 一轮的边界 | 会话内 | 说明 |
 |---|---|---|---|---|
-| Claude Code | hooks in `~/.claude/settings.json` | prompt → `Stop` | `/oops` | Runs locally, no tokens. Claude shows it as "operation blocked by hook"; the `✓ oops` line is the result |
-| Codex | `~/.codex/hooks.json` | prompt → `Stop` / interrupt | `/oops` when the prompt hook includes that text | Trust the hooks once with `/hooks`. Non-interactive: `codex exec --dangerously-bypass-hook-trust`. `!oops` is not installed |
-| Gemini CLI | `~/.gemini/settings.json` | `BeforeAgent` → `AfterAgent` | `/oops` when `BeforeAgent` includes the prompt | Fine alongside Gemini's own checkpointing. No separate slash hook |
-| Cursor CLI | `~/.cursor/hooks.json` | prompt → `stop` | `!oops` | In `-p` mode, prefer `oops run -- cursor-agent` |
-| Anything else | `oops run -- <cmd>` | session, split after 3 s idle | — | Aider, opencode, your own harness |
-| Scripts | `oops snap` | manual checkpoints | — | |
+| Claude Code | `~/.claude/settings.json` 中的 hooks | 提交 prompt → `Stop` | `/oops` | 本地执行，不耗 token。Claude 显示为 “operation blocked by hook”；`✓ oops` 那一行是结果 |
+| Codex | `~/.codex/hooks.json` | 提交 prompt → `Stop` / 中断 | prompt hook 里带有这段文字时的 `/oops` | 需在 `/hooks` 中信任一次。非交互运行用 `codex exec --dangerously-bypass-hook-trust`。不会安装 `!oops` |
+| Gemini CLI | `~/.gemini/settings.json` | `BeforeAgent` → `AfterAgent` | `BeforeAgent` 带上 prompt 时的 `/oops` | 与 Gemini 自带检查点可共存。没有单独的 slash hook |
+| Cursor CLI | `~/.cursor/hooks.json` | 提交 prompt → `stop` | `!oops` | `-p` 模式建议用 `oops run -- cursor-agent` |
+| 其他任意工具 | `oops run -- <cmd>` | 整个会话，静默 3 秒自动切分 | — | Aider、opencode、自研 harness |
+| 脚本 | `oops snap` | 手动检查点 | — | |
 
-`oops init --project` writes project-level config (e.g. `.claude/settings.json`) so a whole team gets it from the repo.
+`oops init --project` 会写入项目级配置（如 `.claude/settings.json`），团队成员拉下仓库即可共享。
 
-Planned for v0.2: GitHub Copilot CLI, opencode, Qwen Code, Amp, Goose. [Request an agent →](https://github.com/lintsinghua/oops/issues/new/choose)
+v0.2 计划支持：GitHub Copilot CLI、opencode、Qwen Code、Amp、Goose。[申请支持新的 Agent →](https://github.com/lintsinghua/oops/issues/new/choose)
 
-## How it works
+## 工作原理
 
 ```
- agent turn starts ──► oops hook returns only after snapshot "pre" is stored
-         … agent edits, runs sed, rm -rf, git clean …
- agent turn ends   ──► oops hook returns only after snapshot "post" is stored
+ Agent 一轮开始 ──► oops hook 要等快照 "pre" 落盘才返回
+        … Agent 编辑文件、跑 sed、rm -rf、git clean …
+ Agent 一轮结束 ──► oops hook 要等快照 "post" 落盘才返回
 
- oops undo  ──►  for each file the turn changed:
-                   still as the agent left it?  → put back the "pre" version
-                   changed since then (by you)? → keep it, tell you why
+ oops undo ──► 对这一轮改过的每个文件：
+                 还是 Agent 留下的样子？      → 还原成 "pre" 版本
+                 之后被你（或别人）改过？    → 保留，并告诉你原因
 ```
 
-- **Snapshots per turn.** Agent hooks mark where a turn starts and ends. oops snapshots the workspace at both points; the difference is exactly what that turn did, no matter which tool did it.
-- **Incremental and content-addressed.** A stat cache means only changed files are read and hashed. Contents are deduplicated, zstd-compressed and immutable — the model is git's (blobs, trees), the storage is not.
-- **Your edits are safe.** Undo compares three states per file: before the turn, after the turn, and now. Anything you (or another agent) changed afterwards is kept and reported, not overwritten. Stop records when it starts and when the post snapshot finishes. A file modified inside that window is kept, because the snapshot may already hold those bytes, so a content comparison cannot be trusted. Every other file is kept only when its content differs from the baseline: the post snapshot, or the bytes the latest undo or redo wrote. `--force` overrides, and the overwritten version is saved first.
-- **Undo is undoable.** Every undo, rewind and restore takes a safety snapshot first, so `oops redo` always gets you back.
-- **Not in your way.** Hook processes always exit 0, and there is no daemon. The turn-start hook stores the pre snapshot before it returns, so a following edit is not what undo restores. The turn-end hook marks the turn ended, stores the post snapshot, and only then returns. A detached process runs retention after that; it does not take the snapshot the agent is waiting on. `oops undo` waits up to 5 seconds for a snapshot that Stop queued and a crash left unfinished, instead of treating the turn as still running. The next turn waits for that post snapshot (at most 30s, then the waiting process finishes it), so the boundary stays intact. If the previous turn is still open, the pre hook closes it from the tree at that moment before storing the new pre snapshot. A later finish does not overwrite that post. If the turn-end process dies during the scan, the job file remains and the next command finishes the turn. Hooks write to stdout only to answer `/oops`, or, on Claude Code, to pass a `systemMessage` when a snapshot was partial or a file was too large to store. Other agents show that notice on the next `oops` command. Each reason is shown once. A hard timeout (default 10s, measured from the start of that scan) marks a snapshot partial and the hook returns.
-- **Not in your repo.** Snapshot data is never written inside the workspace. oops does not write to `.git`, create branches, or stash. `oops init --project` is the exception: it writes the agent's own project config, such as `.claude/settings.json`. Snapshots live in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). `OOPS_HOME` overrides the data directory.
-- **What's included.** Files that are not gitignored, including untracked files, plus protected files even when gitignored (`.env`, `.env.*`, `.envrc`, `*.local`, `*.local.*`, `.dev.vars`, `local.settings.json`). A gitignored path is skipped even if it was force-added. Heavy directories (`node_modules/`, `.venv/`, `target/`, …) are skipped. `dist/` and `build/` are skipped only when a gitignore rule also matches. Tune it with a `.oopsignore` (gitignore syntax). Files over 50 MB are recorded but not stored. `oops doctor`, `oops show`, and the next command say they are unprotected.
+- **按轮快照**。Agent 的 hooks 标出一轮的开始和结束，oops 在这两个时刻给工作区拍快照；两者之差就是这一轮做的全部改动，不管是哪个工具改的。
+- **增量、内容寻址**。借助 stat 缓存，只读取和哈希有变化的文件。内容去重、zstd 压缩、不可变——数据模型借鉴 git（blob、tree），但不使用 git 存储。
+- **你的改动是安全的**。撤销时对每个文件比较三个状态：轮前、轮后、现在。这一轮之后被你（或别的 Agent）改过的文件会被保留并列出，不会被覆盖。Stop 会记下开始时刻和 post 快照写完的时刻。mtime 落在这段时间里的文件会被保留，因为同步快照可能已经把你的改动写进了 post，内容对比不可靠。其余文件只在内容与基线不同时保留：基线是 post 快照，或者最近一次 undo / redo 写下的字节。`--force` 可以强制覆盖，被覆盖的版本会先保存下来。
+- **撤销也能撤销**。每次 undo、rewind、restore 之前都先拍一张安全快照，`oops redo` 一定能回到原样。
+- **不打扰**。hook 进程永远 exit 0，没有常驻进程。轮次开始的 hook 会等 pre 快照落盘才返回，后面的修改不会被当成撤销要恢复的原件。轮次结束的 hook 先把这一轮标成已结束，等 post 快照落盘后才返回。脱离的进程只做保留清理，不再负责 Agent 正在等的那张快照。`oops undo` 会等一张 Stop 已经排队、但扫描中途被打断的快照最多 5 秒，而不会把这一轮当成仍在运行。下一轮会等这张 post 快照（最多 30 秒，超时后由等待的进程自己写完），轮次边界不会错。如果上一轮还开着，pre hook 会先按当时的目录树把它收完，再存新的 pre 快照。之后才跑完的扫描不会覆盖这张 post。轮次结束的进程如果在扫描中途退出，任务文件还在，下一条命令会把这一轮写完。hook 只在回答 `/oops` 时写 stdout；Claude Code 上，快照不完整或有文件大到没存下内容时，还会输出一条 `systemMessage`。其他 Agent 在下一次执行 `oops` 时看到同一条提示。同一个原因只提示一次。硬超时默认 10 秒，从这次扫描开始计时，超时只把快照标成 partial，hook 照常返回。
+- **不碰你的仓库**。快照数据不会写进工作区。不写 `.git`，不建分支，不 stash。例外是 `oops init --project`：它会写入 Agent 自己的项目配置，例如 `.claude/settings.json`。快照在 `~/.local/share/oops`（Windows 为 `%LOCALAPPDATA%\oops`）。`OOPS_HOME` 可以改数据目录。
+- **收录范围**。没被 gitignore 的文件（含未跟踪文件），再加上即使被 gitignore 也受保护的文件（`.env`、`.env.*`、`.envrc`、`*.local`、`*.local.*`、`.dev.vars`、`local.settings.json`）。被 gitignore 的路径即使曾经 `git add -f` 也会跳过。`node_modules/`、`.venv/`、`target/` 等重目录自动跳过。`dist/` 和 `build/` 只在同时命中 gitignore 规则时跳过。可用 `.oopsignore`（gitignore 语法）调整。超过 50 MB 的文件只记录元数据不存内容。`oops doctor`、`oops show` 和下一条命令会说明它们未受保护。
 
-Full details: [docs/how-it-works.md](docs/how-it-works.md)
+详见 [docs/how-it-works.md](docs/how-it-works.md)
 
-## oops vs. built-in checkpoints
+## 与 Agent 自带检查点的对比
 
-oops doesn't replace your agent's checkpoints — it covers what they miss. Use both: the agent's `/rewind` for the conversation, `oops undo` for the files.
+oops 不取代 Agent 自带的检查点，而是补上它们覆盖不到的地方。推荐组合使用：对话用 Agent 的 `/rewind`，文件用 `oops undo`。
 
 | | Claude Code `/rewind` | Codex | Gemini CLI `/restore` | **oops** |
 |---|:-:|:-:|:-:|:-:|
-| Built-in undo available | ✓ | removed (Apr 2026) | opt-in | ✓ |
-| Changes made through shell (`rm`, `mv`, `sed`) | ✗ | — | only snapshots before `write_file` / `replace` | ✓ |
-| Background subagent edits | ✗ | — | — | files written before the turn ends |
-| Untracked and gitignored files (`.env`) | — | — | — | ✓ |
-| Keeps your own edits made after the turn | — | — | ✗ (whole-repo restore + clean) | ✓ |
-| One timeline across agents | ✗ | ✗ | ✗ | ✓ |
-| Independent of the agent session | ✗ (per session) | — | — | ✓ |
-| History kept | 100 checkpoints / session, ~30 days | — | — | 500 turns or 30 days |
-| Rewinds the conversation | ✓ | — | ✓ | ✗ (not a goal) |
+| 有内置撤销 | ✓ | 已移除（2026-04） | 需手动开启 | ✓ |
+| 通过 shell 做的修改（`rm`、`mv`、`sed`） | ✗ | — | 只在 `write_file` / `replace` 前快照 | ✓ |
+| 后台 subagent 的编辑 | ✗ | — | — | 本轮结束前已写到磁盘的文件 |
+| 未跟踪和被 gitignore 的文件（`.env`） | — | — | — | ✓ |
+| 保留你在这一轮之后的改动 | — | — | ✗（整库 restore + clean） | ✓ |
+| 跨 Agent 的统一时间线 | ✗ | ✗ | ✗ | ✓ |
+| 独立于 Agent 会话 | ✗（按会话） | — | — | ✓ |
+| 历史保留 | 每会话 100 个，约 30 天 | — | — | 500 轮或 30 天 |
+| 回滚对话 | ✓ | — | ✓ | ✗（不在目标内） |
 
-<sub>✓ yes · ✗ no · — not applicable or not documented. Sources: [Claude Code checkpointing docs](https://code.claude.com/docs/en/checkpointing), [openai/codex PR #19481](https://github.com/openai/codex/pull/19481), [Gemini CLI checkpointing](https://geminicli.com/docs/cli/checkpointing/). Claude Code `SubagentStop` is recorded and does not split the turn. A file is covered when it is on disk at the parent turn's post snapshot.</sub>
+<sub>✓ 支持 · ✗ 不支持 · — 不适用或文档未说明。来源：[Claude Code 检查点文档](https://code.claude.com/docs/en/checkpointing)、[openai/codex PR #19481](https://github.com/openai/codex/pull/19481)、[Gemini CLI 检查点](https://geminicli.com/docs/cli/checkpointing/)。Claude Code 的 `SubagentStop` 会被记录，且不会把这一轮拆开。文件要在父轮的 post 快照时已经在磁盘上，才会被覆盖到。</sub>
 
 ## FAQ
 
 <details>
-<summary><strong>Will it slow down my agent?</strong></summary>
+<summary><strong>会拖慢 Agent 吗？</strong></summary>
 
-It's built not to. Codex's previous `/undo` was removed partly because its snapshots caused problems for users, so this is oops's first rule. Snapshots are incremental (only files whose size, mtime, or mode changed are re-read), excluded directories are pruned without being walked, and each snapshot has a hard timeout (default 10s) after which it is marked partial and the hook returns. The turn-end hook does not return until the post snapshot is stored. The turn-start hook does not return until the pre snapshot is stored.
+oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因之一就是快照给用户带来了问题，所以这是 oops 的第一条规矩：快照是增量的（只重读 size、mtime 或 mode 变化的文件），被排除的目录直接剪掉不遍历，每次快照有硬超时（默认 10 秒）——超时后快照标记为 partial，hook 返回。轮次结束的 hook 要等 post 快照落盘才返回。轮次开始的 hook 要等 pre 快照落盘才返回。
 
-Measured on 2026-10-14 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank) of 21 samples. Machine: 4 vCPU (Intel Xeon on KVM, 1 thread per core), 16 GB RAM, 256 GB virtio disk (ext4 on `/dev/vdc`; the guest reports the disk as rotational), Linux 6.12.94+ x86_64.
+2026-10-14 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。p50 是 21 个样本里排序后的第 11 个，p95 是第 20 个（nearest-rank）。机器：4 vCPU（KVM 上的 Intel Xeon，每核 1 线程），16 GB 内存，256 GB virtio 磁盘（`/dev/vdc` 上的 ext4；客户机把这块盘报告成机械盘），Linux 6.12.94+ x86_64。
 
-This run measured turn-end at 112 ms / 127 ms for 10,000 files and 1.00 s / 1.11 s for 100,000 files, and turn-start at 99 ms / 153 ms and 0.89 s / 0.99 s. A designer measurement of the same kind of tree was higher: about 180 ms for Stop at 10,000 files, about 1.4 s for Stop at 100,000 files, and about 1.2 s for Start at 100,000 files. QA measured Start at 10,000 files at 174 ms p50 / 240 ms p95, above this run. Each cell below is the higher of the measurements. When that figure is above this run's p95, the published p50 and p95 use it.
+这一轮 harness 测到 turn-end 在 1 万文件是 112 ms / 127 ms、10 万文件是 1.00 s / 1.11 s，turn-start 是 99 ms / 153 ms 和 0.89 s / 0.99 s。同一种目录上的设计测量更高：Stop 在 1 万文件约 180 ms，Stop 在 10 万文件约 1.4 s，Start 在 10 万文件约 1.2 s。QA 测到 1 万文件的 Start 是 p50 174 ms / p95 240 ms，高于这一轮。下面每个格子取更高的数。高于这一轮 p95 时，公布的 p50 和 p95 都用这个数。
 
-**Time the agent waits for the turn-end hook to return.** The post snapshot runs inside that process. `TestHookVisibleLatency` builds `./cmd/oops`, takes one cold turn, waits until any queued snapshot is stored, then times 21 `oops hook claude turn-end` processes from start to exit. The process exits after the snapshot is stored.
+**Agent 等待轮次结束 hook 返回的时间。** post 快照在这个进程里完成。`TestHookVisibleLatency` 编译 `./cmd/oops`，先走一轮冷启动，等已排队的快照落盘，再计时 21 次 `oops hook claude turn-end` 从进程启动到退出。进程在快照落盘之后才退出。
 
-| Files | Agent waits for turn-end hook, p50 | Agent waits for turn-end hook, p95 |
+| 文件数 | Agent 等待 turn-end hook 返回，p50 | Agent 等待 turn-end hook 返回，p95 |
 |---:|---:|---:|
 | 10,000 | 180 ms | 180 ms |
 | 100,000 | 1.4 s | 1.4 s |
 
-**Time the agent waits for the turn-start hook to return.** The pre snapshot runs inside that process. Same method, timing `oops hook claude turn-start` after the previous post snapshot has finished, so this wait is the pre snapshot plus process startup.
+**Agent 等待轮次开始 hook 返回的时间。** pre 快照在这个进程里完成，hook 要等快照落盘才返回。方法和上面的 turn-end 表相同，计时的是上一张 post 快照已经结束后的 `oops hook claude turn-start`，所以这段等待是 pre 快照加上进程启动。
 
-| Files | Agent waits for turn-start hook, p50 | Agent waits for turn-start hook, p95 |
+| 文件数 | Agent 等待 turn-start hook 返回，p50 | Agent 等待 turn-start hook 返回，p95 |
 |---:|---:|---:|
 | 10,000 | 174 ms | 240 ms |
 | 100,000 | 1.2 s | 1.2 s |
 
-The published p50 for a 10,000-file post snapshot is 180 ms. The default 10s timeout marks a snapshot partial and the hook still returns. If the previous post snapshot was killed mid-scan, the turn-start hook waits for the leftover job first, bounded at 30 seconds (`TestWaitPendingBounded`). When that job is already finished, the extra wait is under 50 ms. A dead process does not drop the turn: the job file stays until a later command stores the post snapshot (`TestCrashedChildFinishesTurn`). In-process hot Capture on 2026-10-13, without process startup, was 82 ms / 91 ms at 10k files and 0.82 s / 3.5 s at 100k (`TestHotCapturePercentiles`). The tables above are the later measurement of the wait the agent sees.
+公布的 1 万文件 post 快照 p50 是 180 ms。默认 10 秒超时会把快照标成 partial，hook 仍然返回。如果上一张 post 快照在扫描中途被杀掉，turn-start hook 会先等剩下的任务，上限 30 秒（`TestWaitPendingBounded`）。任务已经完成时，这段额外等待不到 50 ms。进程死掉不会丢掉这一轮：任务文件会留到后面的命令把 post 快照写完（`TestCrashedChildFinishesTurn`）。2026-10-13 的进程内热 Capture（不含进程启动）是 1 万文件 82 ms / 91 ms、10 万文件 0.82 s / 3.5 s（`TestHotCapturePercentiles`）。上面两张表是更晚一次测量，记的是 Agent 实际等待的时间。
 
-**Cold start and memory while scanning.** `TestColdStart10k` times the first in-process Capture of 10,000 files totaling 300,000,000 bytes. On this machine that took 0.69 s (the limit in the PRD is 3 s on Linux). `TestScanRSS100k` sampled VmRSS during a scan of 100,000 files and peaked at 119.5 MiB, 125,341,696 bytes (the limit in the PRD is 150 MB). Measured 2026-10-13. These two figures are one sample each, not a percentile.
+**冷启动和扫描时的内存。** `TestColdStart10k` 计时的是对 10,000 个文件、合计 300,000,000 字节做的第一次进程内 Capture。这台机器上是 0.69 s（PRD 在 Linux 上的上限是 3 s）。`TestScanRSS100k` 在扫描 100,000 个文件时采样 VmRSS，峰值 119.5 MiB，即 125,341,696 字节（PRD 上限是 150 MB）。测于 2026-10-13。这两个数各是一次采样，不是百分位。
 </details>
 
 <details>
-<summary><strong>What does it store, and where?</strong></summary>
+<summary><strong>存了什么？存在哪里？</strong></summary>
 
-File contents of your workspace (deduplicated and compressed), plus a small SQLite database with turn metadata: agent, time, files changed, and the first line of your prompt (max 200 characters stored, common secrets redacted; set `privacy.record_prompts = false` to turn it off). Everything stays in `~/.local/share/oops` (`%LOCALAPPDATA%\oops` on Windows). On Unix, new data directories are `0700` and object files are `0600`. On Windows, the data directory gets an ACL for the current user. After each post snapshot, retention keeps the last 500 turns or 30 days, and drops the oldest turns past 2 GB per workspace or 10 GB overall. `oops gc` does the same expiry on demand. `oops gc --all` deletes that workspace's snapshots. `oops gc --all --global` deletes every workspace. Unreferenced objects newer than one hour are left in place.
+工作区的文件内容（去重并压缩），以及一个小型 SQLite 数据库，记录每一轮的元数据：Agent、时间、改动的文件、prompt 的首行（最多存 200 字符，常见密钥会被脱敏；设置 `privacy.record_prompts = false` 可完全关闭）。数据在 `~/.local/share/oops`（Windows 是 `%LOCALAPPDATA%\oops`）。Unix 上新建的数据目录是 `0700`，对象文件是 `0600`。Windows 上数据目录会设成只给当前用户的 ACL。每张 post 快照之后会自动保留最近 500 轮或 30 天，并在单个工作区超过 2 GB 或全局超过 10 GB 时删掉最旧的轮。`oops gc` 可以手动做同样的清理。`oops gc --all` 删除当前工作区的快照。`oops gc --all --global` 删除所有工作区。一小时内新建、且已无引用的对象会先留着。
 </details>
 
 <details>
-<summary><strong>Snapshots include my <code>.env</code>. Is that a problem?</strong></summary>
+<summary><strong>快照里有我的 <code>.env</code>，这样安全吗？</strong></summary>
 
-That's deliberate — a deleted `.env` is one of the most painful losses. The data never leaves your machine and is readable only by your user. If you'd rather not keep a file, exclude it in `.oopsignore`. See [SECURITY.md](SECURITY.md) for the threat model.
+这是有意为之——`.env` 被删是最让人头疼的损失之一。数据永远不离开你的机器，只有你的用户可以读取。如果不想保存某个文件，把它写进 `.oopsignore`。威胁模型见 [SECURITY.md](SECURITY.md)。
 </details>
 
 <details>
-<summary><strong>How is this different from git?</strong></summary>
+<summary><strong>和 git 是什么关系？</strong></summary>
 
-git is for history you choose to keep; oops is for the minutes between commits. It covers untracked and ignored files, needs no commits, and never touches your repository — no writes to `.git`, no branches, no stashes. It works in folders that aren't git repos at all.
+git 管的是你决定保留的历史，oops 管的是两次提交之间的那几分钟。它覆盖未跟踪和被忽略的文件，不需要提交，也从不碰你的仓库：不写 `.git`，不建分支，不 stash。在不是 git 仓库的目录里也能用。
 </details>
 
 <details>
-<summary><strong>Does it undo database changes, network calls or installed packages?</strong></summary>
+<summary><strong>能撤销数据库改动、网络请求或安装的包吗？</strong></summary>
 
-No. oops restores files inside the workspace. Side effects outside it — databases, network requests, global installs, files elsewhere on disk — can't be undone by oops.
+不能。oops 只恢复工作区内的文件。工作区之外的副作用（数据库、网络请求、全局安装、磁盘其他位置的文件）oops 无法撤销。
 </details>
 
 <details>
-<summary><strong>Does it rewind the agent's conversation?</strong></summary>
+<summary><strong>会回滚 Agent 的对话吗？</strong></summary>
 
-No, that's the agent's job (Claude Code's `/rewind` does it well). Use the agent for the conversation and oops for the files.
+不会，那是 Agent 自己的事（Claude Code 的 `/rewind` 就做得很好）。对话交给 Agent，文件交给 oops。
 </details>
 
 <details>
-<summary><strong>What if I edited a file after the agent's turn?</strong></summary>
+<summary><strong>Agent 这一轮之后我又改了文件怎么办？</strong></summary>
 
-oops keeps your version and tells you which files it skipped and why (exit code `3`). If you really want the agent's change gone too, the output gives you the exact command (`--force`); your version is saved first.
+oops 会保留你的版本，并告诉你跳过了哪些文件、为什么（退出码 `3`）。如果你确实想把 Agent 的改动也撤掉，输出里会给出完整命令（带 `--force`），你的版本会先被保存。
 </details>
 
 <details>
-<summary><strong>Does it send anything over the network?</strong></summary>
+<summary><strong>会联网吗？</strong></summary>
 
-The commands do not phone home. There is no telemetry and no account. `oops version` prints the version, commit, and build date that were compiled in. `oops version --check` is the only network call: it reads the latest GitHub release.
+这些命令不会主动联网。没有遥测，也没有账号。`oops version` 只打印编译进去的版本、提交和构建日期。唯一的网络请求是 `oops version --check`，它读取 GitHub 上的最新 release。
 </details>
 
 <details>
-<summary><strong>Windows?</strong></summary>
+<summary><strong>支持 Windows 吗？</strong></summary>
 
-The same `go test -race ./...` job runs on Linux, macOS, and Windows in CI, including the shared end-to-end scenarios (delete, edit, rename, mode, symlink, Unicode names, empty directories, `.env`, large files, dry-run JSON).
+CI 在 Linux、macOS、Windows 上跑同一条 `go test -race ./...`，其中包含共用的端到端场景（删除、修改、重命名、权限、符号链接、Unicode 文件名、空目录、`.env`、大文件、dry-run JSON）。
 </details>
 
 <details>
-<summary><strong>How do I uninstall?</strong></summary>
+<summary><strong>怎么卸载？</strong></summary>
 
-`oops init --undo` removes the hooks (your other settings stay untouched) and `oops gc --all --global` deletes the snapshots. Then remove the binary the way [Install](#install) describes for the method you used.
+`oops init --undo` 移除 hooks（其他设置不受影响），`oops gc --all --global` 删除所有快照。然后按[安装](#安装)一节里你所用方式的命令删掉二进制。
 </details>
 
-## Contributing
+## 参与贡献
 
-Bug reports, agent adapters and docs fixes are all welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md): dev setup, `make test`, Conventional Commits, DCO sign-off, and a template for adding a new agent adapter. For bugs, please include the output of `oops doctor --json`.
+欢迎提交 bug、Agent 适配器和文档修正。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)：开发环境、`make test`、Conventional Commits、DCO 签名，以及新增 Agent 适配器的模板。提交 bug 时请附上 `oops doctor --json` 的输出。
 
-Security issues: please report privately via [GitHub Security Advisories](https://github.com/lintsinghua/oops/security/advisories/new) — see [SECURITY.md](SECURITY.md).
+安全问题请通过 [GitHub Security Advisories](https://github.com/lintsinghua/oops/security/advisories/new) 私下报告，详见 [SECURITY.md](SECURITY.md)。
 
-## License
+## 许可证
 
 [MIT](LICENSE)
