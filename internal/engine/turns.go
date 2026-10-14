@@ -125,37 +125,39 @@ func (e *Engine) LazyCloseSession(ctx context.Context, ws Workspace, session str
 }
 
 func (e *Engine) finish(ctx context.Context, ws Workspace, t meta.Turn, late bool) (meta.Turn, error) {
-	snap, res, err := e.Capture(ctx, ws, SnapOptions{})
-	if err != nil {
-		return t, err
-	}
-	pre, _, err := e.Files(t.PreSnap)
-	if err != nil {
-		return t, err
-	}
 	cur, gerr := e.DB.GetTurn(ws.ID, t.Seq)
 	// Stop marks the turn pending before this snapshot exists. A later finish
 	// stores the post once. A turn that already has one is left as stored.
 	if gerr == nil && cur.Status != "running" && cur.PostSnap != "" {
 		return cur, nil
 	}
+	// EndedAt is the wall-clock Stop start, taken before the scan. QueueFinish
+	// records it. A direct close records it here so the window matches mtimes.
+	if t.EndedAt.IsZero() && gerr == nil {
+		t.EndedAt = cur.EndedAt
+	}
+	if t.EndedAt.IsZero() {
+		t.EndedAt = time.Now()
+	}
+	snap, res, err := e.Capture(ctx, ws, SnapOptions{})
+	if err != nil {
+		return t, err
+	}
+	snapDone := time.Now()
+	pre, _, err := e.Files(t.PreSnap)
+	if err != nil {
+		return t, err
+	}
 	changes := snapshot.Diff(pre, res.Files)
 	changes = snapshot.AnnotateLines(changes, e.ReadBlob)
 	stats := statsFrom(changes)
 	stats.Overlaps = t.Stats.Overlaps
 	stats.ClosedLate = late
+	stats.SnapDone = snapDone
 	if snap.Partial {
 		t.Status = "partial"
 	} else {
 		t.Status = "done"
-	}
-	// Stop already recorded a wall-clock EndedAt. Keep it. A logical clock
-	// (e.Now) is not comparable with filesystem mtimes.
-	if t.EndedAt.IsZero() && gerr == nil {
-		t.EndedAt = cur.EndedAt
-	}
-	if t.EndedAt.IsZero() {
-		t.EndedAt = e.Now
 	}
 	t.PostSnap = snap.ID
 	t.Stats = stats

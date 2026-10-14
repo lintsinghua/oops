@@ -88,7 +88,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-11 non-TTY undo | PASS | `TestUndoNonTTYLatestAndPipedNo` | A non-terminal never prompts. `oops undo` applies the latest turn and does not treat piped `n` as an answer. An older turn is refused without `-y`. On a terminal, `echo n` cancels the prompt |
 | DEMO-12 undo after Stop | PASS | `TestUndoImmediatelyAfterStop`, `TestUndoCLIImmediatelyAfterStop` | Stop marks the turn ended before the hook returns. The post snapshot can still be queued. 200 immediate undos apply that turn and never say it is still running. A turn that has not received Stop exits 4 without waiting |
 | DEMO-13 end hooks are synchronous | PASS | `TestClaudeEndHooksAreSynchronous`, `TestInitRewritesAsyncClaudeEndHooks` | Claude `Stop`, `StopFailure`, and `SubagentStop` are installed without `async`. Codex, Gemini, and Cursor end hooks are synchronous too. Re-running `init` rewrites an older async entry. `init --undo` puts the previous file back byte for byte. `SessionStart` stays async |
-| DEMO-14 post snapshot finishes before Stop returns | PASS | `TestEditRightAfterStopIsKept`, `TestUndoKeepsFilesNewerThanStop`, `TestUndoForceOverwritesNewerMtime` | The real binary's turn-end hook returns only after the post snapshot is stored. An edit and a new file at that instant stay, exit 3, and the edit is reported kept. A file newer than Stop is kept even when its bytes match the post snapshot; a file that is not newer is undone. `--force` still overwrites. Runs on every OS. A timeout marks the snapshot partial |
+| DEMO-14 post snapshot finishes before Stop returns | PASS | `TestEditRightAfterStopIsKept`, `TestUndoKeepsFilesNewerThanStop`, `TestUndoForceOverwritesNewerMtime` | The real binary's turn-end hook returns only after the post snapshot is stored. An edit and a new file at that instant stay, exit 3, and the edit is reported kept. Stop records its start and the time the post snapshot finishes. A file modified inside that window is kept even when its bytes match the post snapshot. Outside the window, a file is kept only when its content differs from the baseline (the post snapshot, or the bytes the latest undo or redo wrote). `--force` still overwrites. Runs on every OS. A timeout marks the snapshot partial |
 | DEMO-15 timeline stays on the acted-on turn | PASS | `TestTimelineStaysOnActedTurn` | After undo the cursor stays on that turn. The preview is that turn's redo preview |
 | DEMO-16 preview keeps the file count | PASS | `TestTimelinePathCountStaysWhole`, `TestPreviewListsEachPath`, `TestPreviewPathsTruncateSeparately` | Each path is on its own line, capped, then `+K more`, and middle-truncated on its own. `5 files` stays whole. The `ran:` line wraps across lines |
 | DEMO-17 toast reserves a row | PASS | `TestTimelineNoticeReservesRow`, `TestTimelineLayoutAt120` | The toast row is reserved at the full terminal width, blank until a toast arrives. At 120×40 the first list row stays on the same line before and after undo, and the prompt is shown in full |
@@ -98,12 +98,18 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-21 preview stays inside the terminal | PASS | `TestTimelinePreviewFitsHeight`, `TestClipPreviewTightRow` | At 120×22 and 80×24 the title is on line 1 and the view has at most that many lines. Header, toast, and footer stay. A long file list is cut to the rows that remain, then `+K more`. One tight row is `src/api.ts … +3 more` |
 | DEMO-22 stacked list and preview are separated | PASS | `TestTimelinePreviewFitsHeight` | At 120×22 and 80×24 the preview sits under the list with a rule between them |
 | DEMO-23 side-by-side divider spans the pane | PASS | `TestTimelineDividerFullHeight` | At 170 columns the `│` divider is on every row of the taller pane, in one column. Path lines in the preview share one indent |
+| DEMO-24 undo, redo, undo on the same turn | PASS | `TestUndoRedoUndoSameTurn`, `TestUndoRedoUndoSameTurnExitsClean` | Three rounds of undo then redo on the same turn exit 0 and restore the turn's bytes, then the earlier bytes. A real edit after redo is kept, the other file from that turn is reverted, and the command exits 3 |
+| DEMO-25 edit during the post snapshot | PASS | `TestFileTouchedDuringPostSnapshotIsKept` | A file whose mtime is inside [Stop start, post snapshot done], and whose bytes match the post snapshot, is kept. The result is partial and the turn records that path |
+| DEMO-26 timeline names kept files | PASS | `TestUndoNoticeNamesKeptFile`, `TestKeptFileShowsInStatus` | A partial undo toast is `Undid #N, except README.md`. The status column shows that path |
+| DEMO-27 redo does not say undo | PASS | `TestUndoRedoUndoSameTurnExitsClean`, `TestRedoHintSuggestsUndo` | `oops redo` does not print `Undid`. The hint stays `oops undo` |
+| DEMO-28 narrow footer keeps help and quit | PASS | `TestFooterKeepsHelpAndQuit` | At 80×24 the footer shows `? help` and `q quit` and drops the rewind hint |
+| DEMO-29 wide prompt uses the leftover width | PASS | `TestPromptUsesRemainingWidthAt175` | At 175 columns a 95-character prompt is shown in full beside the right-aligned file count |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 94 |
+| PASS | 100 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action

@@ -8,7 +8,62 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/lintsinghua/oops/internal/engine"
+	"github.com/lintsinghua/oops/internal/meta"
 )
+
+func TestUndoRedoUndoSameTurnExitsClean(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	readme := filepath.Join(root, "README.md")
+	mustWriteFile(t, readme, "base")
+	agentTurn(t, home, root, "t1", "other", func() {
+		mustWriteFile(t, filepath.Join(root, "a.txt"), "a")
+	})
+	agentTurn(t, home, root, "t2", "readme", func() {
+		mustWriteFile(t, readme, "turn2")
+		mustWriteFile(t, filepath.Join(root, "b.txt"), "b")
+	})
+	for i := 0; i < 3; i++ {
+		code, out := runOops(t, home, root, "", "undo", "2", "-y")
+		if code != 0 || strings.Contains(out, "except") || strings.Contains(out, "Undid") && strings.Contains(out, "changed afterwards") {
+			t.Fatalf("pass %d undo: %d %s", i, code, out)
+		}
+		if got := mustReadFile(t, readme); got != "base" {
+			t.Fatalf("pass %d undo left %q\n%s", i, got, out)
+		}
+		code, out = runOops(t, home, root, "", "redo")
+		if code != 0 || strings.Contains(out, "Undid") {
+			t.Fatalf("pass %d redo: %d %s", i, code, out)
+		}
+		if got := mustReadFile(t, readme); got != "turn2" {
+			t.Fatalf("pass %d redo left %q\n%s", i, got, out)
+		}
+	}
+	mustWriteFile(t, readme, "user edit")
+	code, out := runOops(t, home, root, "", "undo", "2", "-y")
+	if code != 3 || !strings.Contains(out, "README.md") || !strings.Contains(out, "changed afterwards") {
+		t.Fatalf("user edit: %d %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(root, "b.txt")); !os.IsNotExist(err) {
+		t.Fatalf("b.txt should revert: %v", err)
+	}
+	if got := mustReadFile(t, readme); got != "user edit" {
+		t.Fatalf("user edit lost: %q", got)
+	}
+}
+
+func TestUndoNoticeNamesKeptFile(t *testing.T) {
+	note := undoNotice(engine.UndoResult{
+		Turn:    meta.Turn{Seq: 2},
+		Effects: []engine.Effect{{Path: "README.md", Op: "kept"}},
+	})
+	if note != "Undid #2, except README.md" {
+		t.Fatalf("notice %q", note)
+	}
+}
 
 func TestUndoAfterRedoThenNewTurn(t *testing.T) {
 	t.Run("no edit", func(t *testing.T) {
