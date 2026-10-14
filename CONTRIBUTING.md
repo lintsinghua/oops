@@ -100,3 +100,12 @@ Hook commands are `oops hook <agent> <event>`. Map the agent's events onto `sess
 `Install` must leave a config that is already connected unchanged, and `Uninstall` must delete only entries whose command contains `oops hook`. Write a backup (`*.oops-backup-<pid>`) the same way `finishWrite` does. Add a unit test that installs into a temp home, checks the JSON, then uninstalls and checks that unrelated keys remain.
 
 Document the upstream hook URL on the constructor. Do not invent a minimum tested version; say it is unrecorded until someone has actually run that version.
+
+## Releasing
+
+A `v*` tag runs `.github/workflows/release.yml`. GoReleaser publishes the GitHub Release and pushes `Formula/oops.rb` to [lintsinghua/homebrew-tap](https://github.com/lintsinghua/homebrew-tap). Create that tap repository before the first release. This repo does not create it.
+
+The workflow needs two repository secrets:
+
+- `HOMEBREW_TAP_TOKEN`: a token that can push to `lintsinghua/homebrew-tap`.
+- `NPM_TOKEN`: a token that can publish `@lintsinghua/oops` and the `@lintsinghua/oops-<os>-<cpu>` packages. `scripts/publish-npm.mjs` reads it after GoReleaser.
