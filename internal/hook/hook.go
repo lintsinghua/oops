@@ -96,13 +96,18 @@ func stripHookGlobals(args []string) (home, config string, rest []string) {
 }
 
 func handle(ctx context.Context, e *engine.Engine, ev agents.Event, stdout io.Writer) error {
-	dir := ev.CWD
+	dir := agents.ProjectDir(ev)
 	if dir == "" {
-		if ev.Agent == "claude" {
+		switch ev.Agent {
+		case "claude":
 			dir = os.Getenv("CLAUDE_PROJECT_DIR")
-		}
-		if ev.Agent == "gemini" {
+		case "gemini":
 			dir = os.Getenv("GEMINI_PROJECT_DIR")
+		case "cursor":
+			dir = os.Getenv("CURSOR_PROJECT_DIR")
+			if dir == "" {
+				dir = os.Getenv("CLAUDE_PROJECT_DIR")
+			}
 		}
 	}
 	if dir == "" {

@@ -130,7 +130,7 @@ You only need to remember `oops`. The rest are shortcuts for people who know wha
 | Agent | Connects through | Turn = | In-session | Notes |
 |---|---|---|---|---|
 | Claude Code | hooks in `~/.claude/settings.json` | prompt → `Stop` | `/oops` | Runs locally, no tokens |
-| Codex | `~/.codex/hooks.json` | prompt → `Stop` / interrupt | `/oops` when the prompt hook includes that text | Trust the hooks once with `/hooks`. `!oops` is not installed |
+| Codex | `~/.codex/hooks.json` | prompt → `Stop` / interrupt | `/oops` when the prompt hook includes that text | Trust the hooks once with `/hooks`. Non-interactive: `codex exec --dangerously-bypass-hook-trust`. `!oops` is not installed |
 | Gemini CLI | `~/.gemini/settings.json` | `BeforeAgent` → `AfterAgent` | `/oops` when `BeforeAgent` includes the prompt | Fine alongside Gemini's own checkpointing. No separate slash hook |
 | Cursor CLI | `~/.cursor/hooks.json` | prompt → `stop` | `!oops` | In `-p` mode, prefer `oops run -- cursor-agent` |
 | Anything else | `oops run -- <cmd>` | session, split after 3 s idle | — | Aider, opencode, your own harness |

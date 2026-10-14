@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -227,8 +228,18 @@ func uninstallFile(path string) (Change, bool, error) {
 	if err != nil {
 		return Change{}, false, err
 	}
-	if len(prev) == 0 {
+	backups := listBackups(path)
+	if len(prev) == 0 && len(backups) == 0 {
 		return Change{Path: path}, false, nil
+	}
+	// Init saved the pre-edit bytes. Put those back so a user's hooks file
+	// returns exactly, including key order and whitespace, then delete the copies.
+	if orig, ok := oldestBackup(backups); ok {
+		if err := writeBytesAtomic(path, orig); err != nil {
+			return Change{}, false, err
+		}
+		removeBackups(backups)
+		return Change{Path: path, Before: prev, After: orig}, !bytesEqual(prev, orig), nil
 	}
 	next, changed := RemoveOops(doc)
 	obj, _ := next.(map[string]any)
@@ -236,10 +247,117 @@ func uninstallFile(path string) (Change, bool, error) {
 		obj = map[string]any{}
 	}
 	if !changed {
+		removeBackups(backups)
 		return Change{Path: path, Before: prev, After: prev}, false, nil
 	}
+	if oopsOnly(obj) {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return Change{}, false, err
+		}
+		removeBackups(backups)
+		return Change{Path: path, Before: prev}, true, nil
+	}
 	ch, err := WriteJSON(path, obj, prev)
+	removeBackups(append(backups, listBackups(path)...))
 	return ch, true, err
+}
+
+func listBackups(path string) []string {
+	dir := filepath.Dir(path)
+	prefix := filepath.Base(path) + ".oops-backup-"
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), prefix) {
+			out = append(out, filepath.Join(dir, e.Name()))
+		}
+	}
+	return out
+}
+
+func oldestBackup(paths []string) ([]byte, bool) {
+	if len(paths) == 0 {
+		return nil, false
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		si, ei := os.Stat(paths[i])
+		sj, ej := os.Stat(paths[j])
+		if ei != nil || ej != nil {
+			return paths[i] < paths[j]
+		}
+		if !si.ModTime().Equal(sj.ModTime()) {
+			return si.ModTime().Before(sj.ModTime())
+		}
+		return paths[i] < paths[j]
+	})
+	b, err := os.ReadFile(paths[0])
+	if err != nil {
+		return nil, false
+	}
+	return b, true
+}
+
+func removeBackups(paths []string) {
+	seen := map[string]struct{}{}
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		_ = os.Remove(p)
+	}
+}
+
+func writeBytesAtomic(path string, raw []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	mode := os.FileMode(0o644)
+	if st, err := os.Stat(path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	tmp := path + ".oops-tmp"
+	if err := os.WriteFile(tmp, raw, mode); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return nil
+}
+
+// oopsOnly reports a document that contains nothing but keys oops itself added.
+func oopsOnly(doc map[string]any) bool {
+	if Connected(doc) {
+		return false
+	}
+	for k, v := range doc {
+		switch k {
+		case "hooks":
+			if !dropEmpty(v) {
+				return false
+			}
+		case "version":
+		case "description":
+			s, _ := v.(string)
+			if !strings.Contains(strings.ToLower(s), "oops") {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func finishWrite(path string, doc map[string]any, prev []byte, write bool) (Change, bool, error) {
@@ -270,7 +388,7 @@ func bytesEqual(a, b []byte) bool {
 	return true
 }
 
-var verRe = regexp.MustCompile(`\d+\.\d+(?:\.\d+)?`)
+var verRe = regexp.MustCompile(`v?\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?`)
 
 // Detect finds binaries and whether hooks are already installed.
 func Detect(a Agent, home, project string, projectLevel bool, pathExtra []string) Installation {
@@ -318,25 +436,41 @@ func look(names, extra []string) (string, bool) {
 }
 
 func versionOf(bin string) string {
+	if v := findVersion(commandStdout(bin, "--version")); v != "" {
+		return v
+	}
+	return findVersion(commandStdout(bin, "version"))
+}
+
+func commandStdout(bin string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, bin, "--version").CombinedOutput()
-	if err != nil {
-		ctx2, cancel2 := context.WithTimeout(context.Background(), 800*time.Millisecond)
-		defer cancel2()
-		out, err = exec.CommandContext(ctx2, bin, "version").CombinedOutput()
-		if err != nil && len(out) == 0 {
-			return ""
+	cmd := exec.CommandContext(ctx, bin, args...)
+	out, _ := cmd.Output()
+	return string(out)
+}
+
+// findVersion returns a version token from stdout. Banners and warnings are
+// ignored, including text that only appears on stderr.
+func findVersion(out string) string {
+	var last string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
+		if line == "" {
+			continue
 		}
+		m := verRe.FindString(line)
+		if m == "" {
+			continue
+		}
+		token := strings.TrimPrefix(m, "v")
+		rest := strings.TrimSpace(strings.Replace(line, m, "", 1))
+		if rest == "" || strings.EqualFold(rest, "version") {
+			return token
+		}
+		last = token
 	}
-	line := strings.TrimSpace(string(out))
-	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
-		line = line[:i]
-	}
-	if m := verRe.FindString(line); m != "" {
-		return m
-	}
-	return strings.TrimSpace(line)
+	return last
 }
 
 // ClaudeCommandPath is the slash-command file Claude Code discovers.

@@ -50,7 +50,9 @@ A turn has a pre snapshot and a post snapshot. The difference between them is wh
 | `oops run` | before the wrapped command | when the command exits, and also after `run.idle_split` of silence (default 3s) |
 | `oops snap` | manual checkpoint; pre and post are the same snapshot | |
 
-`oops init` writes hooks whose command contains `oops hook`. `oops init --undo` removes only those entries and leaves the rest of the JSON config. Codex still needs a one-time `/hooks` trust inside Codex; init says so, and `oops doctor` keeps warning until that trust exists because oops cannot see it. Claude Code also gets `~/.claude/commands/oops.md` so `/oops` is a local command. JSON configs are re-serialized, so key order is not preserved. The previous file is copied to `*.oops-backup-<pid>`.
+Cursor user hooks run with the working directory set to `~/.cursor` and no `cwd` field. oops reads `workspace_roots` from the payload, then `CURSOR_PROJECT_DIR`. When several roots are listed, the one that matches `CURSOR_PROJECT_DIR` is the workspace; otherwise oops uses the first root.
+
+`oops init` writes hooks whose command contains `oops hook`. It rewrites the JSON it edits and copies the previous bytes to `*.oops-backup-<pid>`. `oops init --undo` writes those bytes back and deletes the backup files, so a config that already had hooks returns to its exact pre-init contents. A config oops created is removed. Codex still needs a one-time `/hooks` trust inside Codex; init says so, and `oops doctor` keeps warning until that trust exists because oops cannot see it. Non-interactive Codex runs hooks with `codex exec --dangerously-bypass-hook-trust`. Claude Code also gets `~/.claude/commands/oops.md` so `/oops` is a local command.
 
 The hook process always exits 0. It writes stdout only for a `/oops` reply, or a Claude Code `systemMessage` when a snapshot was partial or a file was too large. There is no daemon. A running turn is closed lazily the next time you run an oops command in that workspace, except `version` and `--help`.
 

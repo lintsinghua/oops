@@ -130,7 +130,7 @@ $ oops undo
 | Agent | 接入方式 | 一轮的边界 | 会话内 | 说明 |
 |---|---|---|---|---|
 | Claude Code | `~/.claude/settings.json` 中的 hooks | 提交 prompt → `Stop` | `/oops` | 本地执行，不耗 token |
-| Codex | `~/.codex/hooks.json` | 提交 prompt → `Stop` / 中断 | prompt hook 里带有这段文字时的 `/oops` | 需在 `/hooks` 中信任一次。不会安装 `!oops` |
+| Codex | `~/.codex/hooks.json` | 提交 prompt → `Stop` / 中断 | prompt hook 里带有这段文字时的 `/oops` | 需在 `/hooks` 中信任一次。非交互运行用 `codex exec --dangerously-bypass-hook-trust`。不会安装 `!oops` |
 | Gemini CLI | `~/.gemini/settings.json` | `BeforeAgent` → `AfterAgent` | `BeforeAgent` 带上 prompt 时的 `/oops` | 与 Gemini 自带检查点可共存。没有单独的 slash hook |
 | Cursor CLI | `~/.cursor/hooks.json` | 提交 prompt → `stop` | `!oops` | `-p` 模式建议用 `oops run -- cursor-agent` |
 | 其他任意工具 | `oops run -- <cmd>` | 整个会话，静默 3 秒自动切分 | — | Aider、opencode、自研 harness |

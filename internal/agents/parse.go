@@ -2,6 +2,9 @@ package agents
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -128,4 +131,96 @@ func Slash(prompt string) (args []string, ok bool) {
 		return []string{"list"}, true
 	}
 	return fields[1:], true
+}
+
+// WorkspaceRoots reads Cursor's workspace_roots field. It is a list of
+// workspace folders, normally one. A single string is accepted too.
+func WorkspaceRoots(raw map[string]any) []string {
+	if raw == nil {
+		return nil
+	}
+	switch v := raw["workspace_roots"].(type) {
+	case string:
+		if s := strings.TrimSpace(v); s != "" {
+			return []string{s}
+		}
+	case []any:
+		var out []string
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				continue
+			}
+			s = strings.TrimSpace(s)
+			if s == "" {
+				continue
+			}
+			out = append(out, s)
+		}
+		return out
+	}
+	return nil
+}
+
+// ProjectDir is the workspace a hook should snapshot.
+// Cursor user hooks run with the process working directory set to ~/.cursor
+// and no cwd field. The payload carries workspace_roots, and the process has
+// CURSOR_PROJECT_DIR. When several roots are listed, the one matching
+// CURSOR_PROJECT_DIR wins; otherwise the first root is used.
+func ProjectDir(ev Event) string {
+	roots := WorkspaceRoots(ev.Raw)
+	env := strings.TrimSpace(os.Getenv("CURSOR_PROJECT_DIR"))
+	cwd := strings.TrimSpace(ev.CWD)
+	if ev.Agent == "cursor" || len(roots) > 0 {
+		if d := chooseRoot(roots, env, cwd); d != "" {
+			return d
+		}
+		if (cwd == "" || isCursorConfigDir(cwd)) && env != "" {
+			return env
+		}
+	}
+	return cwd
+}
+
+func chooseRoot(roots []string, env, cwd string) string {
+	if len(roots) == 0 {
+		return ""
+	}
+	if env != "" {
+		for _, r := range roots {
+			if samePath(r, env) {
+				return r
+			}
+		}
+	}
+	if cwd != "" && !isCursorConfigDir(cwd) {
+		for _, r := range roots {
+			if samePath(r, cwd) || pathUnder(cwd, r) {
+				return r
+			}
+		}
+		return ""
+	}
+	return roots[0]
+}
+
+func isCursorConfigDir(dir string) bool {
+	return strings.EqualFold(filepath.Base(filepath.Clean(dir)), ".cursor")
+}
+
+func samePath(a, b string) bool {
+	a = filepath.Clean(a)
+	b = filepath.Clean(b)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+func pathUnder(child, root string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(child))
+	if err != nil {
+		return false
+	}
+	return rel != "." && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
