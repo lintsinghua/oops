@@ -119,6 +119,12 @@ func selectAgents(only []string) []agents.Agent {
 	return out
 }
 
+// needsInstall is a missing agent, or one whose end hook still runs in the
+// background. Re-running init rewrites those async entries.
+func needsInstall(inst agents.Installation) bool {
+	return inst.Found && !inst.Invalid && (!inst.Connected || inst.Stale)
+}
+
 func shortAgent(name string) string {
 	switch name {
 	case "Claude Code":
@@ -192,7 +198,7 @@ func cmdInitWrite(opt *options, rows []foundAgent, exe string, yes, project bool
 	}
 	pending := 0
 	for _, row := range rows {
-		if row.inst.Found && !row.inst.Invalid && !row.inst.Connected {
+		if needsInstall(row.inst) {
 			pending++
 		}
 	}
@@ -219,7 +225,7 @@ func cmdInitWrite(opt *options, rows []foundAgent, exe string, yes, project bool
 	}
 	chosen := map[string]bool{}
 	for _, row := range rows {
-		if row.inst.Found && !row.inst.Invalid && !row.inst.Connected {
+		if needsInstall(row.inst) {
 			chosen[row.agent.Name] = true
 		}
 	}
@@ -250,7 +256,7 @@ func cmdInitWrite(opt *options, rows []foundAgent, exe string, yes, project bool
 				}
 				labels = append(labels, row.agent.Name+"   "+row.inst.Version)
 				names = append(names, row.agent.Name)
-				on = append(on, !row.inst.Connected)
+				on = append(on, needsInstall(row.inst))
 			}
 			picked, err := runPick(opt, labels, on)
 			if err != nil {

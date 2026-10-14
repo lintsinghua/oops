@@ -29,6 +29,9 @@ type Installation struct {
 	Version    string
 	ConfigPath string
 	Connected  bool
+	// Stale means an end hook is already installed and still runs in the
+	// background. init rewrites it so the agent waits for the turn to be marked ended.
+	Stale      bool
 	Invalid    bool
 	InvalidMsg string
 }
@@ -171,6 +174,100 @@ func EnsureHooks(doc map[string]any, groups map[string][]map[string]any) bool {
 
 func eventConnected(v any) bool {
 	return Connected(v)
+}
+
+// ClearAsync removes background flags from oops commands on the named events.
+// A user's own async hook on the same event is left alone. SessionStart is
+// not in this list: it still warms a baseline without blocking the agent.
+func ClearAsync(doc map[string]any, events []string) bool {
+	hooks, _ := doc["hooks"].(map[string]any)
+	if hooks == nil || len(events) == 0 {
+		return false
+	}
+	changed := false
+	for _, event := range events {
+		if stripAsync(hooks[event]) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// HasAsyncEndHook reports an oops end hook that still runs in the background.
+func HasAsyncEndHook(doc map[string]any, events []string) bool {
+	hooks, _ := doc["hooks"].(map[string]any)
+	if hooks == nil {
+		return false
+	}
+	for _, event := range events {
+		if asyncOops(hooks[event]) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripAsync(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		changed := false
+		if isOopsCommand(t) {
+			for _, key := range []string{"async", "background"} {
+				if asyncFlag(t[key]) {
+					delete(t, key)
+					changed = true
+				}
+			}
+		}
+		for _, child := range t {
+			if stripAsync(child) {
+				changed = true
+			}
+		}
+		return changed
+	case []any:
+		changed := false
+		for _, child := range t {
+			if stripAsync(child) {
+				changed = true
+			}
+		}
+		return changed
+	default:
+		return false
+	}
+}
+
+func asyncOops(v any) bool {
+	switch t := v.(type) {
+	case map[string]any:
+		if isOopsCommand(t) && (asyncFlag(t["async"]) || asyncFlag(t["background"])) {
+			return true
+		}
+		for _, child := range t {
+			if asyncOops(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range t {
+			if asyncOops(child) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func asyncFlag(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(t, "true")
+	default:
+		return false
+	}
 }
 
 // RemoveOops deletes hook entries that oops installed. It returns true when

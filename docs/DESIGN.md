@@ -494,7 +494,7 @@ steps(turn_id, idx, tool, summary, pre_snap)        -- v0.2
 
 | Agent | 配置位置 | 开轮 | 关轮 | 步骤（v0.2） | `/oops` | 备注 |
 |---|---|---|---|---|---|---|
-| **Claude Code** | `~/.claude/settings.json`（`--project`：`.claude/settings.json`） | `UserPromptSubmit`（同步；CC 对该事件的默认超时是 30 s，oops 显式设 `timeout: 15`） | `Stop`、`StopFailure`（`async: true`） | `PreToolUse` matcher `Bash\|PowerShell\|Edit\|Write\|MultiEdit\|NotebookEdit` | 安装 `~/.claude/commands/oops.md`，再用 `UserPromptExpansion`（matcher `oops`）拦截，在本地执行并 block，用 reason 显示结果 | `SessionStart` 时异步预热基线；`SubagentStop` 只记录不切轮；Windows 上用 exec 形式（`command`+`args`）避免 shell 引号问题；之后可以作为 plugin 分发 |
+| **Claude Code** | `~/.claude/settings.json`（`--project`：`.claude/settings.json`） | `UserPromptSubmit`（同步；CC 对该事件的默认超时是 30 s，oops 显式设 `timeout: 15`） | `Stop`、`StopFailure`、`SubagentStop`（同步；hook 在毫秒级返回，post 快照仍在后台。`oops init` 会把已安装的 `async: true` 改写掉） | `PreToolUse` matcher `Bash\|PowerShell\|Edit\|Write\|MultiEdit\|NotebookEdit` | 安装 `~/.claude/commands/oops.md`，再用 `UserPromptExpansion`（matcher `oops`）拦截，在本地执行并 block，用 reason 显示结果 | `SessionStart` 时异步预热基线；`SubagentStop` 只记录不切轮；Windows 上用 exec 形式（`command`+`args`）避免 shell 引号问题；之后可以作为 plugin 分发 |
 | **Codex** | `~/.codex/hooks.json`（`--project`：`.codex/hooks.json`） | `UserPromptSubmit`（入参带 `turn_id`） | `Stop`、`Interrupt` | `PreToolUse` matcher `Bash\|apply_patch` | `UserPromptSubmit` 检测到 `/oops` 前缀 → 本地执行，`{"decision":"block","reason":…}` 阻止进入模型；被 TUI 吞掉时退回 `!oops` | hooks 默认开启（`[features] hooks`），非托管 hooks **需要用户在 `/hooks` 中信任**，init 会提示；timeout 单位是秒 |
 | **Gemini CLI** | `~/.gemini/settings.json` | `BeforeAgent` | `AfterAgent` | `BeforeTool` matcher `run_shell_command\|write_file\|replace` | `BeforeAgent` 拦截 `/oops` 前缀 → `decision: deny` 丢弃 prompt，用 reason 显示结果 | timeout 单位是毫秒（默认 60000）；每个 hook 需要 `name` 字段；用户开启了 Gemini 自带 checkpointing 也不冲突 |
 | **Cursor CLI** | `~/.cursor/hooks.json`（`version: 1`） | `beforeSubmitPrompt`（**只有交互模式才触发，`-p` 模式不触发**） | `stop` | `beforeShellExecution`、`afterFileEdit` | 不支持拦截 → 提示用 shell 逃逸 | `-p` 模式退化为：在第一次 `beforeShellExecution` / `afterFileEdit` 前补拍 pre 快照，在 `stop` 时关轮；同时建议使用 `oops run -- cursor-agent` |
@@ -509,8 +509,9 @@ steps(turn_id, idx, tool, summary, pre_snap)        -- v0.2
     "SessionStart":      [{ "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","session-start"], "async": true }] }],
     "UserPromptSubmit":  [{ "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","turn-start"], "timeout": 15 }] }],
     "UserPromptExpansion": [{ "matcher": "oops", "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","slash"] }] }],
-    "Stop":              [{ "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","turn-end"], "async": true }] }],
-    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","turn-end"], "async": true }] }]
+    "Stop":              [{ "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","turn-end"] }] }],
+    "StopFailure":       [{ "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","turn-end"] }] }],
+    "SubagentStop":      [{ "hooks": [{ "type": "command", "command": "/opt/homebrew/bin/oops", "args": ["hook","claude","subagent-stop"] }] }]
   }
 }
 ```
