@@ -1,10 +1,15 @@
 // Package version holds build metadata injected with -ldflags.
 package version
 
-import "fmt"
+import (
+	"fmt"
+	"runtime/debug"
+)
 
 // Version, Commit, and Date are replaced at link time.
 // The defaults apply when a build does not pass -ldflags.
+// Current then fills Version and Commit from debug.ReadBuildInfo when
+// those defaults are still in place, which is what `go install` produces.
 var (
 	Version = "dev"
 	Commit  = "none"
@@ -19,12 +24,60 @@ type Info struct {
 }
 
 // Current returns the metadata linked into this binary.
+// A release build's -ldflags win. Otherwise Main.Version is used when it
+// is a real module version, and vcs.revision is used for the commit.
 func Current() Info {
-	return Info{
-		Version: Version,
-		Commit:  Commit,
-		Date:    Date,
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		info = nil
 	}
+	return fromBuildInfo(Version, Commit, Date, info)
+}
+
+func fromBuildInfo(version, commit, date string, info *debug.BuildInfo) Info {
+	if version == "" || version == "dev" {
+		if v := moduleVersion(info); v != "" {
+			version = v
+		}
+	}
+	if commit == "" || commit == "none" {
+		if rev := setting(info, "vcs.revision"); rev != "" {
+			commit = rev
+		}
+	}
+	if version == "" {
+		version = "dev"
+	}
+	if commit == "" {
+		commit = "none"
+	}
+	if date == "" {
+		date = "unknown"
+	}
+	return Info{Version: version, Commit: commit, Date: date}
+}
+
+func moduleVersion(info *debug.BuildInfo) string {
+	if info == nil {
+		return ""
+	}
+	v := info.Main.Version
+	if v == "" || v == "(devel)" {
+		return ""
+	}
+	return v
+}
+
+func setting(info *debug.BuildInfo, key string) string {
+	if info == nil {
+		return ""
+	}
+	for _, s := range info.Settings {
+		if s.Key == key && s.Value != "" {
+			return s.Value
+		}
+	}
+	return ""
 }
 
 // String prints the version, commit, and build date.
