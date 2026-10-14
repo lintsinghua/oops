@@ -15,27 +15,39 @@ func TestVersionSkipsBanner(t *testing.T) {
 	var body string
 	if runtime.GOOS == "windows" {
 		path += ".cmd"
-		body = "@echo off\r\necho warning: experimental build 1>&2\r\necho banner: starting 1.0 helper\r\necho 0.64.0\r\n"
+		body = "@echo off\r\necho warning: experimental build 9.9.9 1>&2\r\necho 2.1.296 (Claude Code)\r\n"
 	} else {
-		body = "#!/bin/sh\necho 'warning: experimental build' >&2\necho 'banner: starting 1.0 helper'\necho '0.64.0'\n"
+		body = "#!/bin/sh\necho 'warning: experimental build 9.9.9' >&2\necho '2.1.296 (Claude Code)'\n"
 	}
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := versionOf(path); got != "0.64.0" {
+	if got := versionOf(path); got != "2.1.296" {
 		t.Fatalf("version %q", got)
 	}
-	if got := findVersion("warning: experimental build\n"); got != "" {
-		t.Fatalf("banner parsed as %q", got)
+}
+
+func TestFindVersionOutputs(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"2.1.296 (Claude Code)\n", "2.1.296"},
+		{"codex-cli 0.162.1\n", "0.162.1"},
+		{"0.64.0\n", "0.64.0"},
+		{"v0.64.0\n", "0.64.0"},
+		{"version 0.64.0\n", "0.64.0"},
+		{"banner: starting 1.0 helper\n", "1.0"},
+		{"warning: experimental build\n", ""},
+		{"Error: You must log in.\n", ""},
+		{"Error: You must log in. See https://example.com/v1.2.3\n", "1.2.3"},
+		{"banner: starting 1.0 helper\n0.64.0\n", "1.0"},
+		{"warning: experimental build 9.9.9\n2.1.296 (Claude Code)\n", "9.9.9"},
 	}
-	if got := findVersion("banner: starting 1.0 helper\n"); got != "" {
-		t.Fatalf("banner version %q", got)
-	}
-	if got := findVersion("Error: You must log in. See https://example.com/v1.2.3\n"); got != "" {
-		t.Fatalf("error line parsed as %q", got)
-	}
-	if got := findVersion("version 0.64.0\n"); got != "0.64.0" {
-		t.Fatalf("version prefix %q", got)
+	for _, tc := range cases {
+		if got := findVersion(tc.in); got != tc.want {
+			t.Errorf("findVersion(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }
 
@@ -92,10 +104,10 @@ func TestGeminiVersionDoesNotRun(t *testing.T) {
 func TestNonSemverVersionIsUnknown(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "claude")
-	body := "#!/bin/sh\necho 'Error: You must log in. See notes v1.2.3'\n"
+	body := "#!/bin/sh\necho 'Error: You must log in before continuing.'\n"
 	if runtime.GOOS == "windows" {
 		path += ".cmd"
-		body = "@echo off\r\necho Error: You must log in. See notes v1.2.3\r\n"
+		body = "@echo off\r\necho Error: You must log in before continuing.\r\n"
 	}
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)

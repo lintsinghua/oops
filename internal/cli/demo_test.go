@@ -129,9 +129,22 @@ func TestRedoHintSuggestsUndo(t *testing.T) {
 }
 
 func TestPreviewUndoneSaysRedo(t *testing.T) {
-	text, _ := previewTurn(nil, meta.Turn{Seq: 3, Status: "undone", Prompt: "tidy"}, nil)
-	if !strings.Contains(text, "already undone") || !strings.Contains(text, "Redo #3") || strings.Contains(text, "Undo #3 would") {
+	changes := []snapshot.Change{
+		{Path: "a.txt", Action: "deleted", UndoAction: "restore"},
+		{Path: "b.txt", Action: "deleted", UndoAction: "restore"},
+		{Path: "c.txt", Action: "deleted", UndoAction: "restore"},
+		{Path: "d.txt", Action: "deleted", UndoAction: "restore"},
+		{Path: "e.txt", Action: "modified", UndoAction: "revert"},
+	}
+	text, _ := previewTurn(nil, meta.Turn{Seq: 2, Status: "undone", Prompt: "tidy"}, changes)
+	if !strings.Contains(text, "already undone") || !strings.Contains(text, "Redo #2 would re-apply:") {
 		t.Fatal(text)
+	}
+	if strings.Contains(text, "Undo #2 would") || strings.Contains(text, "restore") {
+		t.Fatalf("undo wording in redo preview:\n%s", text)
+	}
+	if !strings.Contains(text, "remove") || !strings.Contains(text, "4 files") || !strings.Contains(text, "modify") {
+		t.Fatalf("re-apply lines:\n%s", text)
 	}
 	text, _ = previewTurn(nil, meta.Turn{Seq: 3, Status: "done"}, nil)
 	if !strings.Contains(text, "Undo #3 would") {
@@ -150,6 +163,45 @@ func TestSlashSuccessIsShort(t *testing.T) {
 	}
 	if strings.Count(out, "\n") > 2 {
 		t.Fatalf("slash undo is long:\n%s", out)
+	}
+}
+
+func TestUndoNonTTYLatestAndPipedNo(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	mustWriteFile(t, filepath.Join(root, "a.txt"), "v1")
+	agentTurn(t, home, root, "t1", "first", func() {
+		mustWriteFile(t, filepath.Join(root, "a.txt"), "v2")
+	})
+	agentTurn(t, home, root, "t2", "second", func() {
+		mustWriteFile(t, filepath.Join(root, "a.txt"), "v3")
+	})
+
+	code, out := runOops(t, home, root, "n\n", "undo", "1")
+	if code != 2 || !strings.Contains(out, "needs confirmation") || strings.Contains(out, "Undo?") {
+		t.Fatalf("older non-tty: %d %s", code, out)
+	}
+	if got := mustReadFile(t, filepath.Join(root, "a.txt")); got != "v3" {
+		t.Fatalf("older undo wrote %q", got)
+	}
+
+	code, out = runOops(t, home, root, "n\n", "undo")
+	if code != 0 || strings.Contains(out, "Undo?") || !strings.Contains(out, "turn #2") {
+		t.Fatalf("latest non-tty: %d %s", code, out)
+	}
+	if got := mustReadFile(t, filepath.Join(root, "a.txt")); got != "v2" {
+		t.Fatalf("latest undo got %q", got)
+	}
+
+	testingTTY = func(any) bool { return true }
+	t.Cleanup(func() { testingTTY = nil })
+	code, out = runOops(t, home, root, "n\n", "undo", "1")
+	if code != 0 || !strings.Contains(out, "Nothing changed.") || !strings.Contains(out, "Undo?") {
+		t.Fatalf("piped n: %d %s", code, out)
+	}
+	if got := mustReadFile(t, filepath.Join(root, "a.txt")); got != "v2" {
+		t.Fatalf("piped n applied undo: %q\n%s", got, out)
 	}
 }
 

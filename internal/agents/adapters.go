@@ -588,35 +588,24 @@ func commandStdout(bin string, args ...string) string {
 	return string(out)
 }
 
-// findVersion returns a version from a clean stdout line: the line is a semver,
-// or it is "version <semver>", or it is a known program name plus a semver.
-// A semver buried in an error or a banner is ignored.
+// findVersion returns the first semver token in stdout. Surrounding words on
+// the same line are ignored. The caller passes stdout only, so stderr banners
+// never reach this function.
 func findVersion(out string) string {
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(strings.TrimRight(line, "\r"))
 		if line == "" {
 			continue
 		}
-		if v, ok := normalizeSemver(line); ok {
-			return v
+		m := verRe.FindString(line)
+		if m == "" {
+			continue
 		}
-		fields := strings.Fields(line)
-		if len(fields) == 2 && (strings.EqualFold(fields[0], "version") || agentPrefix(fields[0])) {
-			if v, ok := normalizeSemver(fields[1]); ok {
-				return v
-			}
+		if v, ok := normalizeSemver(m); ok {
+			return v
 		}
 	}
 	return ""
-}
-
-func agentPrefix(s string) bool {
-	switch strings.ToLower(s) {
-	case "claude", "codex", "cursor", "cursor-agent", "agent", "oops", "gemini":
-		return true
-	default:
-		return false
-	}
 }
 
 // ClaudeCommandPath is the slash-command file Claude Code discovers.

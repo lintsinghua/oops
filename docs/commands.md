@@ -321,7 +321,11 @@ Global Flags:
 ## `oops undo`
 
 ```
-Undo the last turn, or a specific one
+Undo the last turn, or a specific one.
+
+With no turn number, the latest turn is applied even when stdin is not a terminal. No prompt is shown, so piped input is not an answer: echo n | oops undo still undoes that turn.
+
+An older turn, or --force, asks Undo? [Y/n] on a terminal, and a piped answer is honored (echo n cancels). Without a terminal that undo is refused unless you pass -y. A non-terminal never prompts.
 
 Usage:
   oops undo [turn] [flags]
