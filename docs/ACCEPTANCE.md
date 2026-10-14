@@ -60,7 +60,7 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | F20 AC3 | PASS | `TestE2EPartialNoticeAndHookExit` | Claude gets one `oops ·` systemMessage. The next command does not repeat it |
 | §6.2 10k turn-end | PASS | `TestHookVisibleLatency` | Published agent wait 180 ms / 180 ms, the higher of this run (112 ms / 127 ms) and the designer measurement (~180 ms). The post snapshot is stored before the hook returns. Measured 2026-10-14: 4 vCPU Intel Xeon on KVM, 16 GB RAM, 256 GB virtio disk, Linux 6.12.94+ |
 | §6.2 100k turn-end | PASS | `TestHookVisibleLatency` | Published wait 1.4 s / 1.4 s. This run was 1.00 s / 1.11 s; the designer measurement was ~1.4 s |
-| §6.2 turn-start | PASS | `TestHookVisibleLatency` | Published pre-snapshot wait: 99 ms / 153 ms at 10k (this run; no designer figure) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s) |
+| §6.2 turn-start | PASS | `TestHookVisibleLatency` | Published pre-snapshot wait: 174 ms / 240 ms at 10k (this run was 99 ms / 153 ms; QA measured 174 ms / 240 ms) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s) |
 | §6.2 in-process capture | PASS | `TestHotCapturePercentiles` | Scan without process startup, measured 2026-10-13: 82 ms / 91 ms at 10k, 0.82 s / 3.5 s at 100k. The agent wait is the turn-end row |
 | §6.2 empty turn | PASS | `TestEmptyTurnAddsLittle` | Unchanged checkpoint adds at most 4 KB of objects |
 | §6.2 undo 1k | PASS | `TestUndoThousandFiles` | The Windows 2 s target is measured on Windows amd64. windows-11-arm: Known gap, to be optimized in v0.1.x (non-blocking). Atomic writes stay. Under 1 s on the Linux measurement machine. Hosted windows-11-arm, without `-race`, took 2.06 s (Go 1.26.9) and 3.93 s (Go 1.27.2) on 2026-10-13 |
@@ -106,14 +106,19 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | DEMO-29 wide prompt uses the leftover width | PASS | `TestPromptUsesRemainingWidthAt175` | At 175 columns a 95-character prompt is shown in full beside the right-aligned file count |
 | DEMO-30 partial row marker stays in its column | PASS | `TestKeptFileShowsInStatus` | After a partial undo the row is `9 files` then `partial`, with a gap. The path is not concatenated onto the count |
 | DEMO-31 partial undo preview is the redo preview | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | The preview says the turn is undone (partial) and `Redo #N would re-apply:`. The lines are the redo plan, so a kept file is `keep 1 file (yours)` and the other files are `add 8 files` |
-| DEMO-32 partial redo toast names the file | PASS | `TestRedoNoticeNamesKeptFile`, `TestPartialRedoToastMatchesCLI` | The timeline toast is `! Redid the last change, except 1 file you changed afterwards` and names the file |
-| DEMO-33 preview counts match the applied plan | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | Undo and redo previews, and the confirm card, use the plan Undo and Redo apply. The preview counts equal the applied result: `remove 8 files, keep 1 file (yours)` then `add 8 files, keep 1 file (yours)` |
+| DEMO-32 partial redo toast names the file | PASS | `TestRedoNoticeNamesKeptFile`, `TestPartialRedoToastMatchesCLI`, `TestApplyTimelineRedoNamesKeptFile` | The timeline toast is `! Redid the last change, except 1 file you changed afterwards` and names the file |
+| DEMO-33 preview counts match the applied plan | PASS | `TestPreviewPartialUndoSaysRedo`, `TestKeptFileShowsInStatus` | Undo and redo previews, and the confirm card, use the plan Undo and Redo apply. The preview counts equal the applied result: `remove 8 files, keep 1 file (yours)` then `add 8 files, keep 1 file (yours)`. The confirm card says `keep 1 file (yours)` |
+| DEMO-34 hints name only the kept file | PASS | `TestPartialHintsTargetKeptFilesOnly` | After a partial undo and a partial redo, every suggested command in the text and in `--json` is `oops undo N --file` for exactly the kept file. Directories and parent paths are not targets |
+| DEMO-35 redo dry run says redo | PASS | `TestRedoDryRunUsesRedoWording` | `oops redo -n` is headed `Redo turn #N would` and ends `Run oops redo to apply.` |
+| DEMO-36 a kept file stays the user's | PASS | `TestKeptFileSurvivesUndoRedoUndo`, `TestKeptUserFileSurvivesSecondUndo` | Undo, redo, undo, redo on a turn that kept a user edit leaves that file in place and exits 3. `--force` overwrites it |
+| DEMO-37 timeline color follows the palette | PASS | `TestListRowColors`, `TestDiffColorsAddedAndRemoved` | Agent and time are Muted. `+` / `−` in the file count are Success / Danger. `undone` and `partial` are Warning. Diff additions are Success and removals are Danger. `NO_COLOR` and color off leave the text plain |
+| DEMO-38 the timeline fits the terminal | PASS | `TestConfirmCardKeepsTitle`, `TestClipPreviewShowsSingleHiddenFile`, `TestStackedPreviewBlanksBeforeRan` | At 30 rows the confirm card leaves the title on screen. A `+1 more` that would hide one file shows that file instead. Stacked layout has a blank line before `ran:` |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 104 |
+| PASS | 109 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action
@@ -132,4 +137,4 @@ These are not FAIL. G1–G10 are v0.2 in the PRD and are not implemented. The ot
 
 ## Hook wait vs snapshot completion
 
-The turn-end hook returns only after the post snapshot is stored. On 2026-10-14 the published wait is 180 ms p50 / 180 ms p95 at 10k files and 1.4 s / 1.4 s at 100k, the higher of `TestHookVisibleLatency` (112 ms / 127 ms and 1.00 s / 1.11 s) and a designer measurement (~180 ms and ~1.4 s). The turn-start hook returns only after the pre snapshot is stored. The published wait is 99 ms / 153 ms at 10k (this run) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s). Machine: 4 vCPU (Intel Xeon on KVM), 16 GB RAM, 256 GB virtio disk (ext4), Linux 6.12.94+. A timeout marks the snapshot partial. A file whose mtime falls inside the post-snapshot window is kept. Outside that window, a file is kept only when its content differs from the baseline.
+The turn-end hook returns only after the post snapshot is stored. On 2026-10-14 the published wait is 180 ms p50 / 180 ms p95 at 10k files and 1.4 s / 1.4 s at 100k, the higher of `TestHookVisibleLatency` (112 ms / 127 ms and 1.00 s / 1.11 s) and a designer measurement (~180 ms and ~1.4 s). The turn-start hook returns only after the pre snapshot is stored. The published wait is 174 ms / 240 ms at 10k (this run was 99 ms / 153 ms; QA measured 174 ms / 240 ms) and 1.2 s / 1.2 s at 100k (this run was 0.89 s / 0.99 s; the designer measurement was ~1.2 s). Machine: 4 vCPU (Intel Xeon on KVM), 16 GB RAM, 256 GB virtio disk (ext4), Linux 6.12.94+. A timeout marks the snapshot partial. A file whose mtime falls inside the post-snapshot window is kept. Outside that window, a file is kept only when its content differs from the baseline.

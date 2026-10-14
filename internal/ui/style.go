@@ -48,8 +48,11 @@ type Styles struct {
 // NewStyles builds styles. Color is disabled when enabled is false.
 func NewStyles(enabled bool) Styles {
 	r := lipgloss.NewRenderer(os.Stdout)
-	if !enabled {
+	if !enabled || os.Getenv("NO_COLOR") != "" {
 		r.SetColorProfile(termenv.Ascii)
+	} else if r.ColorProfile() == termenv.Ascii {
+		// --color=always and tests ask for color even when stdout is not a terminal.
+		r.SetColorProfile(termenv.TrueColor)
 	}
 	return Styles{
 		Enabled: enabled,

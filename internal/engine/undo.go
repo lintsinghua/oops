@@ -68,7 +68,7 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 					return UndoResult{}, err
 				}
 			} else {
-				return e.reapply(ctx, req.Workspace, op, req.DryRun)
+				return e.reapply(ctx, req.Workspace, op, req.DryRun, req.Force)
 			}
 		}
 	}
@@ -392,10 +392,15 @@ func (e *Engine) planUndoItems(ws Workspace, t meta.Turn, cur map[string]snapsho
 }
 
 // planRedoItems is the plan Redo applies to a recorded undo.
+// A path kept as the user's file stays kept for the rest of this chain.
 func planRedoItems(recorded []restore.Item, cur map[string]snapshot.Meta) []restore.Item {
 	var items []restore.Item
 	for _, ef := range recorded {
 		now := lookup(cur, ef.Path)
+		if ef.Op == "kept" || ef.Op == "unprotected" {
+			items = append(items, restore.Item{Path: ef.Path, Op: "kept", Reason: "changed_after_turn", Before: now, Want: ef.Before})
+			continue
+		}
 		if !snapshot.SameState(now, ef.After) && !snapshot.SameState(now, ef.Want) {
 			items = append(items, restore.Item{Path: ef.Path, Op: "kept", Reason: "changed_after_turn", Before: now, Want: ef.Before})
 			continue
@@ -478,7 +483,7 @@ type opDetail struct {
 }
 
 // reapply puts an undone stack operation back into effect (undo of a redo).
-func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool) (UndoResult, error) {
+func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry, force bool) (UndoResult, error) {
 	var detail opDetail
 	if err := json.Unmarshal([]byte(op.Detail), &detail); err != nil {
 		return UndoResult{}, err
@@ -493,6 +498,17 @@ func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool
 			continue
 		}
 		now := lookup(curRes.Files, ef.Path)
+		// A file kept on the way down stays the user's unless --force.
+		// Matching the recorded "before" bytes is that user version, not a
+		// license to write the undo target over it.
+		if (ef.Op == "kept" || ef.Op == "unprotected") && !force {
+			if snapshot.SameState(now, ef.Want) {
+				items = append(items, restore.Item{Path: ef.Path, Op: "skip", Reason: "already", Before: now, Want: ef.Want, After: ef.Want})
+			} else {
+				items = append(items, restore.Item{Path: ef.Path, Op: "kept", Reason: "changed_after_turn", Before: now, Want: ef.Want, After: now})
+			}
+			continue
+		}
 		switch {
 		case snapshot.SameState(now, ef.Want) || snapshot.SameState(now, ef.After):
 			items = append(items, restore.Item{Path: ef.Path, Op: "skip", Reason: "already", Before: now, Want: ef.Want, After: ef.Want})

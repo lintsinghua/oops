@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -9,6 +10,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 )
+
+var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+func stripANSI(s string) string { return ansiPattern.ReplaceAllString(s, "") }
 
 // RelTime formats a timestamp the way the timeline does.
 func RelTime(now, t time.Time) string {
@@ -143,8 +148,8 @@ func Pad(s string, width int) string {
 	return s + strings.Repeat(" ", width-w)
 }
 
-// DisplayWidth is the terminal width of s.
-func DisplayWidth(s string) int { return runewidth.StringWidth(s) }
+// DisplayWidth is the terminal width of s. ANSI color codes do not count.
+func DisplayWidth(s string) int { return runewidth.StringWidth(stripANSI(s)) }
 
 // RuneLen counts runes, used where byte length would split a character.
 func RuneLen(s string) int { return utf8.RuneCountInString(s) }

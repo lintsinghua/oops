@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"regexp"
 	"strings"
 	"testing"
 
@@ -42,10 +41,4 @@ func TestVersionModelQuits(t *testing.T) {
 	if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatalf("Update() cmd produced %T, want tea.QuitMsg", cmd())
 	}
-}
-
-var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
-
-func stripANSI(s string) string {
-	return ansiPattern.ReplaceAllString(s, "")
 }

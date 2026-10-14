@@ -81,7 +81,7 @@ func cmdUndo(opt *options, seq int, files []string, dry, force, yes, running boo
 			return nil
 		}
 		_, sym := stylesOf(opt)
-		renderDry(opt.stdout, res, sym, time.Now())
+		renderDry(opt.stdout, res, sym, time.Now(), "undo")
 		return nil
 	}
 	renderUndo(opt.stdout, opt, res, "undo")
@@ -140,7 +140,7 @@ func confirmUndo(opt *options, s *session, seq int, files []string, force, yes, 
 		return explain(s, seq, err)
 	}
 	_, sym := stylesOf(opt)
-	renderDry(opt.stderr, res, sym, time.Now())
+	renderDry(opt.stderr, res, sym, time.Now(), "undo")
 	fmt.Fprint(opt.stderr, "Undo? [Y/n] ")
 	ok, err := ask(opt.stdin, true)
 	if err != nil {
@@ -225,7 +225,7 @@ func cmdRewind(opt *options, seq int, dry, force, yes bool) error {
 	}
 	if dry {
 		_, sym := stylesOf(opt)
-		renderDry(opt.stdout, res, sym, time.Now())
+		renderDry(opt.stdout, res, sym, time.Now(), "rewind")
 		return nil
 	}
 	renderUndo(opt.stdout, opt, res, "rewind")
@@ -257,7 +257,7 @@ func newRedoCmd(opt *options) *cobra.Command {
 					return nil
 				}
 				_, sym := stylesOf(opt)
-				renderDry(opt.stdout, res, sym, time.Now())
+				renderDry(opt.stdout, res, sym, time.Now(), "redo")
 				return nil
 			}
 			renderUndo(opt.stdout, opt, res, "redo")

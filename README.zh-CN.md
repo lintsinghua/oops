@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>Agent 闯祸，一键撤回。</strong><br>
+  <strong>「Agent 的 Ctrl+Z」</strong><br>
   Claude Code、Codex、Gemini、Cursor 对文件做的任何改动都能撤销，<code>rm -rf</code> 也不例外。
 </p>
 
@@ -21,8 +21,16 @@
   <a href="./README.md">English</a> · 简体中文
 </p>
 
+> **Agent 改乱了你的项目？一句 /oops，一键回到对话前。**
+
+- **整轮撤回**：Agent 一轮改了 30 个文件？一条命令，全部还原。
+- **你的改动不丢**：自动区分 Agent 与你的修改，只撤回 Agent 的部分。
+- **随时反悔**：撤回、重做都支持，完整时间线前后自由切换。
+- **不碰 .git**：独立快照，Git 历史一行不改。
+- **在 Agent 里直接用**：通过 hook 接入 Claude Code、Codex、Gemini CLI、Cursor CLI，无需切换工具，在对话中输入 /oops 即可撤回。
+
 <p align="center">
-  <img alt="oops run 包住 rm -rf src &amp;&amp; git clean -fdx。oops undo 把 src 和 .env 恢复回来。" src="assets/demo.gif" width="820">
+  <img alt="两个场景：在 Claude Code 里用 /oops 撤销，以及在完整时间线里撤销和重做。" src="assets/demo.gif" width="820">
 </p>
 
 ```sh
@@ -189,7 +197,7 @@ oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因
 
 2026-10-14 用 `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` 测得（`internal/engine/perf_test.go`）。夹具是分布在 200 个目录里的 N 个互不相同的 32 字节文件。p50 是 21 个样本里排序后的第 11 个，p95 是第 20 个（nearest-rank）。机器：4 vCPU（KVM 上的 Intel Xeon，每核 1 线程），16 GB 内存，256 GB virtio 磁盘（`/dev/vdc` 上的 ext4；客户机把这块盘报告成机械盘），Linux 6.12.94+ x86_64。
 
-这一轮 harness 测到 turn-end 在 1 万文件是 112 ms / 127 ms、10 万文件是 1.00 s / 1.11 s，turn-start 是 99 ms / 153 ms 和 0.89 s / 0.99 s。同一种目录上的设计测量更高：Stop 在 1 万文件约 180 ms，Stop 在 10 万文件约 1.4 s，Start 在 10 万文件约 1.2 s。下面每个格子取两者里更高的数。设计测量高于这一轮 p95 时，公布的 p50 和 p95 都用这个数。1 万文件的 Start 没有设计测量，所以那一行是这一轮的结果。
+这一轮 harness 测到 turn-end 在 1 万文件是 112 ms / 127 ms、10 万文件是 1.00 s / 1.11 s，turn-start 是 99 ms / 153 ms 和 0.89 s / 0.99 s。同一种目录上的设计测量更高：Stop 在 1 万文件约 180 ms，Stop 在 10 万文件约 1.4 s，Start 在 10 万文件约 1.2 s。QA 测到 1 万文件的 Start 是 p50 174 ms / p95 240 ms，高于这一轮。下面每个格子取更高的数。高于这一轮 p95 时，公布的 p50 和 p95 都用这个数。
 
 **Agent 等待轮次结束 hook 返回的时间。** post 快照在这个进程里完成。`TestHookVisibleLatency` 编译 `./cmd/oops`，先走一轮冷启动，等已排队的快照落盘，再计时 21 次 `oops hook claude turn-end` 从进程启动到退出。进程在快照落盘之后才退出。
 
@@ -202,7 +210,7 @@ oops 的设计目标就是不拖慢。Codex 上一版 `/undo` 被移除，原因
 
 | 文件数 | Agent 等待 turn-start hook 返回，p50 | Agent 等待 turn-start hook 返回，p95 |
 |---:|---:|---:|
-| 10,000 | 99 ms | 153 ms |
+| 10,000 | 174 ms | 240 ms |
 | 100,000 | 1.2 s | 1.2 s |
 
 公布的 1 万文件 post 快照 p50 是 180 ms。默认 10 秒超时会把快照标成 partial，hook 仍然返回。如果上一张 post 快照在扫描中途被杀掉，turn-start hook 会先等剩下的任务，上限 30 秒（`TestWaitPendingBounded`）。任务已经完成时，这段额外等待不到 50 ms。进程死掉不会丢掉这一轮：任务文件会留到后面的命令把 post 快照写完（`TestCrashedChildFinishesTurn`）。2026-10-13 的进程内热 Capture（不含进程启动）是 1 万文件 82 ms / 91 ms、10 万文件 0.82 s / 3.5 s（`TestHotCapturePercentiles`）。上面两张表是更晚一次测量，记的是 Agent 实际等待的时间。
