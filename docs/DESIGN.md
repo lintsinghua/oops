@@ -841,7 +841,7 @@ $ oops doctor
   ]
 }
 ```
-`undo --json` 返回 `{ "result": "ok|partial|refused", "restored": [...], "removed": [...], "reverted": [...], "kept": [{"path":…, "reason":"changed_after_turn"}], "redo": "oops redo" }`。
+`undo --json` 返回 `{ "result": "ok|partial|refused", "restored": [...], "removed": [...], "reverted": [...], "kept": [{"path":…, "reason":"changed_after_turn"}], "next": "oops redo" }`。`next` 是下一步最可能执行的命令。
 
 ### 4.6 退出码
 

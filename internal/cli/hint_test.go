@@ -197,6 +197,40 @@ func TestRedoAppliedSaysReapplied(t *testing.T) {
 	}
 }
 
+func TestJSONNextCommand(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	mustWriteFile(t, filepath.Join(root, "a.txt"), "v1\n")
+	agentTurn(t, home, root, "t", "edit", func() {
+		mustWriteFile(t, filepath.Join(root, "a.txt"), "v2\n")
+	})
+	assertNext := func(args []string, want string) {
+		t.Helper()
+		code, out := runOops(t, home, root, "", args...)
+		if code != 0 {
+			t.Fatalf("%v %d\n%s", args, code, out)
+		}
+		var doc map[string]any
+		if err := json.Unmarshal([]byte(out), &doc); err != nil {
+			t.Fatalf("json: %v\n%s", err, out)
+		}
+		if _, ok := doc["redo"]; ok {
+			t.Fatalf("redo key still present\n%s", out)
+		}
+		if doc["schema_version"] != float64(1) {
+			t.Fatalf("schema %#v", doc["schema_version"])
+		}
+		if doc["next"] != want {
+			t.Fatalf("%v next %#v\n%s", args, doc["next"], out)
+		}
+	}
+	assertNext([]string{"undo", "-n", "--json"}, "oops undo")
+	assertNext([]string{"undo", "-y", "--json"}, "oops redo")
+	assertNext([]string{"redo", "-n", "--json"}, "oops redo")
+	assertNext([]string{"redo", "--json"}, "oops undo")
+}
+
 func TestRedoJSONSuggestsUndo(t *testing.T) {
 	home := t.TempDir()
 	root := t.TempDir()
@@ -209,7 +243,7 @@ func TestRedoJSONSuggestsUndo(t *testing.T) {
 		t.Fatalf("undo %d\n%s", code, out)
 	}
 	code, out := runOops(t, home, root, "", "redo", "-n", "--json")
-	if code != 0 || !strings.Contains(out, `"redo": "oops redo"`) {
+	if code != 0 || !strings.Contains(out, `"next": "oops redo"`) || strings.Contains(out, `"redo"`) {
 		t.Fatalf("dry json %d\n%s", code, out)
 	}
 	code, out = runOops(t, home, root, "", "redo", "--json")
@@ -217,15 +251,15 @@ func TestRedoJSONSuggestsUndo(t *testing.T) {
 		t.Fatalf("redo json %d\n%s", code, out)
 	}
 	var doc struct {
-		Redo     string   `json:"redo"`
+		Next     string   `json:"next"`
 		Restored []string `json:"restored"`
 		Reverted []string `json:"reverted"`
 	}
 	if err := json.Unmarshal([]byte(out), &doc); err != nil {
 		t.Fatalf("json: %v\n%s", err, out)
 	}
-	if doc.Redo != "oops undo" {
-		t.Fatalf("next step %q\n%s", doc.Redo, out)
+	if doc.Next != "oops undo" {
+		t.Fatalf("next step %q\n%s", doc.Next, out)
 	}
 	if len(doc.Reverted) != 0 || !contains(doc.Restored, "README.md") {
 		t.Fatalf("restored %#v reverted %#v", doc.Restored, doc.Reverted)
@@ -363,13 +397,13 @@ func assertRedoJSONKeepsFile(t *testing.T, out, path string) {
 		t.Fatalf("kept %#v", doc.Kept)
 	}
 	var next struct {
-		Redo string `json:"redo"`
+		Next string `json:"next"`
 	}
 	if err := json.Unmarshal([]byte(out), &next); err != nil {
 		t.Fatalf("json: %v\n%s", err, out)
 	}
-	if next.Redo != "oops undo" {
-		t.Fatalf("next step %q\n%s", next.Redo, out)
+	if next.Next != "oops undo" || strings.Contains(out, `"redo"`) {
+		t.Fatalf("next step %q\n%s", next.Next, out)
 	}
 	if strings.Contains(out, "--file") || strings.Contains(out, "Undo it too") {
 		t.Fatalf("undo --file in redo json:\n%s", out)

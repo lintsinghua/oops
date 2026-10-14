@@ -82,7 +82,6 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
 	restored := pathsOf(res.Effects, "restore")
 	reverted := pathsOf(res.Effects, "revert")
 	commands := keptFileCommands(res)
-	next := "oops redo"
 	if verb == "redo" {
 		// A redo puts the agent's bytes back. That is a restore, not a revert,
 		// and the hint must not tell the user to undo the file they just kept.
@@ -90,9 +89,6 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
 		sort.Strings(restored)
 		reverted = []string{}
 		commands = []string{}
-		if !res.DryRun {
-			next = "oops undo"
-		}
 	}
 	out := map[string]any{
 		"schema_version": 1,
@@ -102,7 +98,7 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
 		"reverted":       reverted,
 		"kept":           keptOf(res.Effects),
 		"commands":       commands,
-		"redo":           next,
+		"next":           nextCommand(verb, res.DryRun),
 		"dry_run":        res.DryRun,
 	}
 	if writtenCount(res.Effects) == 0 && res.Result == "partial" {
@@ -111,6 +107,22 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult, verb string) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(out)
+}
+
+// nextCommand is the command the text output tells the user to run next.
+// A dry run points at the command that applies it. An applied undo points at
+// redo, and an applied redo points at undo.
+func nextCommand(verb string, dry bool) string {
+	if dry {
+		if verb == "redo" {
+			return "oops redo"
+		}
+		return "oops undo"
+	}
+	if verb == "redo" {
+		return "oops undo"
+	}
+	return "oops redo"
 }
 
 func pathsOf(effects []engine.Effect, op string) []string {

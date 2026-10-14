@@ -70,12 +70,12 @@ Commands that accept `--json` print a single JSON document with `"schema_version
   "reverted": ["a.txt"],
   "kept": [],
   "commands": [],
-  "redo": "oops redo",
+  "next": "oops undo",
   "dry_run": true
 }
 ```
 
-For undo, `commands` lists `oops undo <turn> --file <path> --force` for each kept file. Directory paths and parent paths are omitted. `kept` lists those same files. A redo lists a content change under `restored`, not `reverted`, and `commands` is empty. After an applied redo, `redo` is `oops undo`, the same next step the text prints. A dry-run redo still says `oops redo`.
+`next` is the command the text tells you to run next. `oops undo -n` is `oops undo`. `oops redo -n` is `oops redo`. An applied undo is `oops redo`. An applied redo is `oops undo`. There is no `redo` field. For undo, `commands` lists `oops undo <turn> --file <path> --force` for each kept file. Directory paths and parent paths are omitted. `kept` lists those same files. A redo lists a content change under `restored`, not `reverted`, and `commands` is empty.
 
 ## `oops doctor --json`
 
