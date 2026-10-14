@@ -148,6 +148,7 @@ func timelineRows(s *session) ([]tui.Row, error) {
 		row := tui.Row{
 			Seq: t.Seq, Agent: t.Agent, When: ui.RelTime(now, t.StartedAt),
 			Prompt: t.Prompt, Files: t.Stats.Files, Status: t.Status,
+			Insertions: t.Stats.Insertions, Deletions: t.Stats.Deletions,
 		}
 		changes, err := s.e.ChangesBetween(t)
 		if err == nil {
@@ -183,10 +184,17 @@ func previewTurn(e *engine.Engine, t meta.Turn, changes []snapshot.Change) (stri
 	var diffs []string
 	partial := t.Status == "kept" || len(t.Stats.Kept) > 0
 	redoView := partial || t.Status == "undone"
+	keptSet := map[string]bool{}
+	for _, p := range t.Stats.Kept {
+		keptSet[p] = true
+	}
 	for _, c := range snapshot.FileChanges(changes) {
 		op := c.UndoAction
 		if redoView {
 			op = reapplyOp(c.Action)
+		}
+		if keptSet[c.Path] {
+			op = "keep"
 		}
 		effects = append(effects, engine.Effect{Path: c.Path, Op: op})
 		oldB, newB := []byte(nil), []byte(nil)

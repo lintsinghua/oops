@@ -67,13 +67,8 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	for _, line := range groupLines(res.Effects, true) {
 		fmt.Fprintln(w, "  "+line)
 	}
-	if res.Result == "partial" && verb != "redo" {
-		fmt.Fprintln(w)
-		for _, ef := range res.Effects {
-			if ef.Op == "kept" || ef.Op == "unprotected" {
-				fmt.Fprintf(w, "  Undo it too (your version is saved):  oops undo %d --file %s --force\n", res.Turn.Seq, ef.Path)
-			}
-		}
+	if res.Result == "partial" {
+		writeKeptHints(w, res)
 	}
 	fmt.Fprintln(w)
 	if verb == "redo" {
@@ -91,6 +86,7 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult) {
 		"removed":        pathsOf(res.Effects, "remove"),
 		"reverted":       pathsOf(res.Effects, "revert"),
 		"kept":           keptOf(res.Effects),
+		"commands":       keptFileCommands(res),
 		"redo":           "oops redo",
 		"dry_run":        res.DryRun,
 	}
@@ -117,15 +113,79 @@ func pathsOf(effects []engine.Effect, op string) []string {
 
 func keptOf(effects []engine.Effect) []map[string]string {
 	var out []map[string]string
-	for _, ef := range effects {
-		if ef.Op == "kept" || ef.Op == "unprotected" {
-			out = append(out, map[string]string{"path": ef.Path, "reason": ef.Reason})
+	for _, path := range keptFilePaths(effects) {
+		reason := ""
+		for _, ef := range effects {
+			if ef.Path == path && (ef.Op == "kept" || ef.Op == "unprotected") {
+				reason = ef.Reason
+				break
+			}
 		}
+		out = append(out, map[string]string{"path": path, "reason": reason})
 	}
 	if out == nil {
 		out = []map[string]string{}
 	}
 	return out
+}
+
+// keptFilePaths is the files a partial undo or redo left in place.
+// Directories and parent paths are omitted: a directory hint would overwrite
+// the user's file inside it.
+func keptFilePaths(effects []engine.Effect) []string {
+	var paths []string
+	seen := map[string]bool{}
+	for _, ef := range effects {
+		if ef.Dir || strings.HasSuffix(ef.Path, "/") {
+			continue
+		}
+		if ef.Op != "kept" && ef.Op != "unprotected" {
+			continue
+		}
+		if seen[ef.Path] {
+			continue
+		}
+		seen[ef.Path] = true
+		paths = append(paths, ef.Path)
+	}
+	var out []string
+	for _, p := range paths {
+		if parentOfAny(p, paths) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func parentOfAny(path string, paths []string) bool {
+	prefix := strings.TrimSuffix(path, "/") + "/"
+	for _, other := range paths {
+		if other != path && strings.HasPrefix(other, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func keptFileCommands(res engine.UndoResult) []string {
+	paths := keptFilePaths(res.Effects)
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, fmt.Sprintf("oops undo %d --file %s --force", res.Turn.Seq, p))
+	}
+	return out
+}
+
+func writeKeptHints(w io.Writer, res engine.UndoResult) {
+	paths := keptFilePaths(res.Effects)
+	if len(paths) == 0 || res.Turn.Seq <= 0 {
+		return
+	}
+	fmt.Fprintln(w)
+	for _, p := range paths {
+		fmt.Fprintf(w, "  Undo it too (your version is saved):  oops undo %d --file %s --force\n", res.Turn.Seq, p)
+	}
 }
 
 func renderNothingWritten(w io.Writer, opt *options, res engine.UndoResult) {
@@ -135,14 +195,7 @@ func renderNothingWritten(w io.Writer, opt *options, res engine.UndoResult) {
 	for _, line := range groupLines(res.Effects, true) {
 		fmt.Fprintln(w, "  "+line)
 	}
-	if res.Turn.Seq > 0 {
-		fmt.Fprintln(w)
-		for _, ef := range res.Effects {
-			if ef.Op == "kept" || ef.Op == "unprotected" {
-				fmt.Fprintf(w, "  Undo it too (your version is saved):  oops undo %d --file %s --force\n", res.Turn.Seq, ef.Path)
-			}
-		}
-	}
+	writeKeptHints(w, res)
 	fmt.Fprintln(w)
 }
 
@@ -423,11 +476,21 @@ func writeShowJSON(w io.Writer, t meta.Turn, changes []snapshot.Change) error {
 	return enc.Encode(out)
 }
 
-func renderDry(w io.Writer, res engine.UndoResult, sym ui.Symbols, now time.Time) {
-	fmt.Fprintf(w, "Undo turn #%d %s %s %s %s %s %s\n\n", res.Turn.Seq, sym.Sep, res.Turn.Agent, sym.Sep, ui.RelTime(now, res.Turn.StartedAt), sym.Sep, ui.Quote(res.Turn.Prompt, 60))
+func renderDry(w io.Writer, res engine.UndoResult, sym ui.Symbols, now time.Time, verb string) {
+	name := "Undo"
+	apply := "undo"
+	switch verb {
+	case "redo":
+		name = "Redo"
+		apply = "redo"
+	case "rewind":
+		name = "Rewind"
+		apply = "rewind"
+	}
+	fmt.Fprintf(w, "%s turn #%d would %s %s %s %s %s %s\n\n", name, res.Turn.Seq, sym.Sep, res.Turn.Agent, sym.Sep, ui.RelTime(now, res.Turn.StartedAt), sym.Sep, ui.Quote(res.Turn.Prompt, 60))
 	for _, line := range groupLines(res.Effects, false) {
 		fmt.Fprintln(w, "  "+line)
 	}
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Dry run — nothing changed. Run oops undo to apply.")
+	fmt.Fprintf(w, "Dry run — nothing changed. Run oops %s to apply.\n", apply)
 }

@@ -69,10 +69,13 @@ Commands that accept `--json` print a single JSON document with `"schema_version
   "removed": [],
   "reverted": ["a.txt"],
   "kept": [],
+  "commands": [],
   "redo": "oops redo",
   "dry_run": true
 }
 ```
+
+`commands` lists `oops undo <turn> --file <path> --force` for each kept file. Directory paths and parent paths are omitted. `kept` lists those same files.
 
 ## `oops doctor --json`
 

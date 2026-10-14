@@ -729,3 +729,160 @@ func TestTimelineMoveAndRewind(t *testing.T) {
 		t.Fatal("esc should cancel")
 	}
 }
+
+func TestListRowColors(t *testing.T) {
+	rows := []Row{
+		{Seq: 2, Agent: "claude", When: "1 min ago", Prompt: "edit", Files: 1, Status: "done", Preview: "  Undo #2 would:\n"},
+		{Seq: 1, Agent: "codex", When: "2 min ago", Prompt: "other", Files: 3, Status: "kept", Insertions: 4, Deletions: 2, Preview: "  Undo #1 would:\n"},
+	}
+	plain := New(rows, "proj", "", false, true)
+	plain.Width = 120
+	plain.Height = 24
+	if strings.Contains(plain.View(), "\x1b") {
+		t.Fatal("color off still painted")
+	}
+	t.Setenv("NO_COLOR", "1")
+	muted := New(rows, "proj", "", true, false)
+	muted.Width = 120
+	muted.Height = 24
+	if strings.Contains(muted.View(), "\x1b") {
+		t.Fatal("NO_COLOR still painted")
+	}
+	t.Setenv("NO_COLOR", "")
+	st := ui.NewStyles(true)
+	colored := New(rows, "proj", "", true, false)
+	colored.Width = 140
+	colored.Height = 24
+	view := colored.View()
+	if !strings.Contains(view, ui.Paint(st.Muted, ui.Pad("codex", 7))) {
+		t.Fatalf("agent color:\n%s", view)
+	}
+	if !strings.Contains(view, ui.Paint(st.Muted, ui.Pad("2 min ago", 11))) {
+		t.Fatalf("time color:\n%s", view)
+	}
+	if !strings.Contains(view, ui.Paint(st.Success, "+4")) || !strings.Contains(view, ui.Paint(st.Danger, "−2")) {
+		t.Fatalf("file delta:\n%s", view)
+	}
+	if !strings.Contains(view, ui.Paint(st.Warning, "partial")) {
+		t.Fatalf("partial color:\n%s", view)
+	}
+	undone := rows
+	undone[1].Status = "undone"
+	again := New(undone, "proj", "", true, false)
+	again.Width = 140
+	again.Height = 24
+	if !strings.Contains(again.View(), ui.Paint(st.Warning, "undone")) {
+		t.Fatalf("undone color:\n%s", again.View())
+	}
+}
+
+func TestDiffColorsAddedAndRemoved(t *testing.T) {
+	rows := []Row{{
+		Seq: 1, Agent: "claude", When: "1 min ago", Prompt: "edit", Files: 1, Status: "done",
+		Diffs: []string{" #1 · revert a.txt\n@@ -1 +1 @@\n-old\n+new\n"},
+	}}
+	off := New(rows, "proj", "", false, true)
+	var model tea.Model = off
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	if strings.Contains(model.(Model).View(), "\x1b") {
+		t.Fatal("diff painted with color off")
+	}
+	t.Setenv("NO_COLOR", "")
+	st := ui.NewStyles(true)
+	on := New(rows, "proj", "", true, false)
+	model = on
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	got := model.(Model)
+	view := got.View()
+	var added, removed, hunk string
+	for _, line := range strings.Split(view, "\n") {
+		switch {
+		case strings.Contains(line, "+new"):
+			added = line
+		case strings.Contains(line, "-old"):
+			removed = line
+		case strings.Contains(line, "@@"):
+			hunk = line
+		}
+	}
+	if !strings.Contains(added, "\x1b") || !strings.Contains(removed, "\x1b") {
+		t.Fatalf("diff lines not colored\nadded %q\nremoved %q", added, removed)
+	}
+	if strings.Contains(hunk, "\x1b") {
+		t.Fatalf("hunk colored: %q", hunk)
+	}
+	if !strings.Contains(added, st.Success.Render("+new")) && !strings.Contains(st.Success.Render(added), "+new") {
+		// The viewport pads the line; the added text itself must use Success.
+		if !strings.Contains(added, "38;") && !strings.Contains(added, "32") {
+			t.Fatalf("added line %q", added)
+		}
+	}
+}
+
+func TestConfirmCardKeepsTitle(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("  Undo #1 would:\n\n    remove   20 files\n")
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&b, "      src/file%d.ts\n", i)
+	}
+	b.WriteString("\n  ran: tidy\n")
+	rows := make([]Row, 12)
+	for i := range rows {
+		rows[i] = Row{Seq: 12 - i, Agent: "claude", When: "1 min ago", Prompt: "edit", Files: 20, Status: "done", Preview: b.String()}
+	}
+	m := New(rows, "proj", "", false, true)
+	m.Width = 100
+	m.Height = 30
+	m.confirm = true
+	m.pending = "undo"
+	m.yes = true
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	if len(lines) > 30 || !strings.Contains(lines[0], "oops") {
+		t.Fatalf("%d lines, title %q\n%s", len(lines), lines[0], view)
+	}
+	if !strings.Contains(view, "Undo turn #") {
+		t.Fatalf("card:\n%s", view)
+	}
+}
+
+func TestClipPreviewShowsSingleHiddenFile(t *testing.T) {
+	lines := []string{
+		"  remove   2 files",
+		"    src/a.ts",
+		"    src/b.ts",
+	}
+	got := strings.Join(clipPreview(lines, 3), "\n")
+	if strings.Contains(got, "+1 more") || !strings.Contains(got, "src/a.ts") || !strings.Contains(got, "src/b.ts") {
+		t.Fatalf("hidden file:\n%s", got)
+	}
+}
+
+func TestStackedPreviewBlanksBeforeRan(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("  Undo #2 would:\n\n    remove   8 files\n")
+	for i := 0; i < 8; i++ {
+		fmt.Fprintf(&b, "      src/file%d.ts\n", i)
+	}
+	b.WriteString("  ran: tidy the module\n")
+	rows := []Row{{
+		Seq: 2, Agent: "claude", When: "1 min ago", Prompt: "edit", Files: 8, Status: "done", Preview: b.String(),
+	}}
+	for i := 0; i < 6; i++ {
+		rows = append(rows, Row{Seq: 1, Agent: "codex", When: "2 min ago", Prompt: "x", Files: 1, Status: "done", Preview: "  Undo #1 would:\n"})
+	}
+	m := New(rows, "proj", "", false, true)
+	m.Width = 100
+	m.Height = 30
+	view := m.View()
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "ran:") {
+			if i == 0 || strings.TrimSpace(lines[i-1]) != "" {
+				t.Fatalf("no blank before ran:\n%s", view)
+			}
+			return
+		}
+	}
+	t.Fatalf("ran missing\n%s", view)
+}

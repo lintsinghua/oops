@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/lintsinghua/oops/internal/engine"
 	"github.com/lintsinghua/oops/internal/meta"
 	"github.com/lintsinghua/oops/internal/snapshot"
@@ -252,6 +254,49 @@ func TestPreviewPartialUndoSaysRedo(t *testing.T) {
 	}
 	if redoRow.Plan != "add 8 files, keep 1 file (yours)" {
 		t.Fatalf("plan %q", redoRow.Plan)
+	}
+	if strings.Contains(redoRow.Preview, "modify") || !strings.Contains(redoRow.Preview, "1 file (yours)") {
+		t.Fatalf("preview:\n%s", redoRow.Preview)
+	}
+	card := tui.New([]tui.Row{redoRow}, "proj", "", false, true)
+	card.Width = 120
+	card.Height = 30
+	var model tea.Model = card
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	view := model.(tui.Model).View()
+	if !strings.Contains(view, "keep 1 file (yours)") || strings.Contains(view, "modify") {
+		t.Fatalf("confirm card:\n%s", view)
+	}
+	if lines := strings.Split(view, "\n"); len(lines) == 0 || !strings.Contains(lines[0], "oops") || len(lines) > 30 {
+		t.Fatalf("title left the 30-row card view (%d lines)\n%s", len(lines), view)
+	}
+}
+
+func TestApplyTimelineRedoNamesKeptFile(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	gitInit(t, root)
+	mustWriteFile(t, filepath.Join(root, "base.txt"), "base")
+	if err := os.MkdirAll(filepath.Join(root, "pkg"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	agentTurn(t, home, root, "t1", "add nine", func() {
+		for i := 1; i <= 9; i++ {
+			mustWriteFile(t, filepath.Join(root, "pkg", "m"+strconv.Itoa(i)+".go"), "pkg")
+		}
+	})
+	mustWriteFile(t, filepath.Join(root, "pkg", "m1.go"), "user edit")
+	s := openSession(t, home, root)
+	defer s.e.Close()
+	if _, err := s.e.Undo(context.Background(), engine.UndoRequest{Workspace: s.ws, Seq: 1}); err != nil {
+		t.Fatal(err)
+	}
+	_, notice, err := applyTimeline(s, tui.Action{Kind: "redo", Seq: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(notice, "except") || !strings.Contains(notice, "pkg/m1.go") {
+		t.Fatalf("notice %q", notice)
 	}
 }
 

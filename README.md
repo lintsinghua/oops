@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>Ctrl+Z for coding agents.</strong><br>
+  <strong>Ctrl+Z for Agent.</strong><br>
   Undo anything Claude Code, Codex, Gemini or Cursor did to your files. Even <code>rm -rf</code>.
 </p>
 
@@ -21,8 +21,16 @@
   English · <a href="./README.zh-CN.md">简体中文</a>
 </p>
 
+> **Your agent just wrecked your project? Type `/oops` and jump back to before the conversation in one step.**
+
+- **Whole-turn undo**: Agent changed 30 files in one turn? One command restores them all.
+- **Your edits stay safe**: oops tells the agent's changes apart from yours and undoes only the agent's.
+- **Change your mind anytime**: Undo and redo freely, back and forth through the full timeline.
+- **Never touches `.git`**: Independent snapshots. Your Git history stays exactly as it is.
+- **Works right inside your agent**: Hooks into Claude Code, Codex, Gemini CLI and Cursor CLI. No switching tools, just type `/oops` in the chat.
+
 <p align="center">
-  <img alt="oops run wraps rm -rf src &amp;&amp; git clean -fdx. oops undo restores src and .env." src="assets/demo.gif" width="820">
+  <img alt="Two scenes: undoing with /oops inside Claude Code, and undo and redo in the full timeline." src="assets/demo.gif" width="820">
 </p>
 
 ```sh
@@ -189,7 +197,7 @@ It's built not to. Codex's previous `/undo` was removed partly because its snaps
 
 Measured on 2026-10-14 with `OOPS_PERF=1 go test -count=1 -timeout 45m -run TestHookVisibleLatency ./internal/engine/` (`internal/engine/perf_test.go`). The fixture is N unique 32-byte files across 200 directories. p50 is the 11th sorted sample and p95 is the 20th (nearest-rank) of 21 samples. Machine: 4 vCPU (Intel Xeon on KVM, 1 thread per core), 16 GB RAM, 256 GB virtio disk (ext4 on `/dev/vdc`; the guest reports the disk as rotational), Linux 6.12.94+ x86_64.
 
-This run measured turn-end at 112 ms / 127 ms for 10,000 files and 1.00 s / 1.11 s for 100,000 files, and turn-start at 99 ms / 153 ms and 0.89 s / 0.99 s. A designer measurement of the same kind of tree was higher: about 180 ms for Stop at 10,000 files, about 1.4 s for Stop at 100,000 files, and about 1.2 s for Start at 100,000 files. Each cell below is the higher of the two. When the designer figure is above this run's p95, that figure is both the published p50 and the published p95. Start at 10,000 files has no designer figure, so that row is this run.
+This run measured turn-end at 112 ms / 127 ms for 10,000 files and 1.00 s / 1.11 s for 100,000 files, and turn-start at 99 ms / 153 ms and 0.89 s / 0.99 s. A designer measurement of the same kind of tree was higher: about 180 ms for Stop at 10,000 files, about 1.4 s for Stop at 100,000 files, and about 1.2 s for Start at 100,000 files. QA measured Start at 10,000 files at 174 ms p50 / 240 ms p95, above this run. Each cell below is the higher of the measurements. When that figure is above this run's p95, the published p50 and p95 use it.
 
 **Time the agent waits for the turn-end hook to return.** The post snapshot runs inside that process. `TestHookVisibleLatency` builds `./cmd/oops`, takes one cold turn, waits until any queued snapshot is stored, then times 21 `oops hook claude turn-end` processes from start to exit. The process exits after the snapshot is stored.
 
@@ -202,7 +210,7 @@ This run measured turn-end at 112 ms / 127 ms for 10,000 files and 1.00 s / 1.11
 
 | Files | Agent waits for turn-start hook, p50 | Agent waits for turn-start hook, p95 |
 |---:|---:|---:|
-| 10,000 | 99 ms | 153 ms |
+| 10,000 | 174 ms | 240 ms |
 | 100,000 | 1.2 s | 1.2 s |
 
 The published p50 for a 10,000-file post snapshot is 180 ms. The default 10s timeout marks a snapshot partial and the hook still returns. If the previous post snapshot was killed mid-scan, the turn-start hook waits for the leftover job first, bounded at 30 seconds (`TestWaitPendingBounded`). When that job is already finished, the extra wait is under 50 ms. A dead process does not drop the turn: the job file stays until a later command stores the post snapshot (`TestCrashedChildFinishesTurn`). In-process hot Capture on 2026-10-13, without process startup, was 82 ms / 91 ms at 10k files and 0.82 s / 3.5 s at 100k (`TestHotCapturePercentiles`). The tables above are the later measurement of the wait the agent sees.

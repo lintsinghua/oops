@@ -3,29 +3,33 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/lintsinghua/oops/internal/ui"
 )
 
 // Row is one timeline line prepared by the CLI.
 type Row struct {
-	Gap     bool
-	Seq     int
-	Agent   string
-	When    string
-	Prompt  string
-	Files   int
-	Status  string
-	Preview string
-	Plan    string
-	Diff    string
-	Diffs   []string
+	Gap        bool
+	Seq        int
+	Agent      string
+	When       string
+	Prompt     string
+	Files      int
+	Insertions int
+	Deletions  int
+	Status     string
+	Preview    string
+	Plan       string
+	Diff       string
+	Diffs      []string
 }
 
 // Action is what the user confirmed, if anything.
@@ -73,6 +77,11 @@ type Model struct {
 
 // New builds a model. rows are newest-first.
 func New(rows []Row, header, notice string, color, ascii bool) Model {
+	// The diff viewport renders through the default lipgloss profile. A
+	// non-terminal stdout would strip the added and removed colors.
+	if color && os.Getenv("NO_COLOR") == "" {
+		lipgloss.SetColorProfile(termenv.TrueColor)
+	}
 	m := Model{
 		Rows: rows, Header: header, notice: notice,
 		styles: ui.NewStyles(color), sym: ui.Glyphs(ascii),
@@ -307,6 +316,22 @@ func (m Model) runApply(action Action) tea.Cmd {
 	}
 }
 
+// paintDiff colors added lines with Success and removed lines with Danger.
+// Headers (+++) and context lines stay plain. NO_COLOR leaves the text as-is.
+func paintDiff(text string, st ui.Styles) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		trim := strings.TrimLeft(line, " ")
+		switch {
+		case strings.HasPrefix(trim, "+") && !strings.HasPrefix(trim, "+++"):
+			lines[i] = st.Success.Render(line)
+		case strings.HasPrefix(trim, "-") && !strings.HasPrefix(trim, "---") && !strings.HasPrefix(trim, "--"):
+			lines[i] = st.Danger.Render(line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m *Model) showDiff(row Row) {
 	parts := fileDiffs(row)
 	if len(parts) == 0 {
@@ -319,7 +344,7 @@ func (m *Model) showDiff(row Row) {
 	if m.fileIdx >= len(parts) {
 		m.fileIdx = len(parts) - 1
 	}
-	m.diffVP.SetContent(parts[m.fileIdx])
+	m.diffVP.SetContent(paintDiff(parts[m.fileIdx], m.styles))
 }
 
 func (m *Model) stepFile(d int) {
@@ -397,9 +422,67 @@ func (m Model) View() string {
 	}
 	body := m.body()
 	if m.confirm {
-		body = lipgloss.Place(max(m.Width, 20), max(m.Height, 10), lipgloss.Center, lipgloss.Center, body+"\n"+m.card())
+		return m.overlayCard(body)
 	}
 	return body
+}
+
+// overlayCard keeps the title on screen. The card is centered in the rows
+// under the title and clipped to the height that remains.
+func (m Model) overlayCard(body string) string {
+	height := m.Height
+	if height < 1 {
+		height = 24
+	}
+	width := m.Width
+	if width < 1 {
+		width = 80
+	}
+	lines := strings.Split(body, "\n")
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	cardLines := strings.Split(m.card(), "\n")
+	top := 0
+	if strings.Contains(lines[0], "oops") {
+		top = 1
+		if len(lines) > 1 && strings.Contains(lines[1], "─") {
+			top = 2
+		}
+	}
+	room := height - top
+	if room < 1 {
+		room = height
+		top = 0
+	}
+	if len(cardLines) > room {
+		cardLines = cardLines[:room]
+	}
+	start := top
+	if gap := room - len(cardLines); gap > 0 {
+		start = top + gap/2
+	}
+	for i, line := range cardLines {
+		idx := start + i
+		if idx < 0 || idx >= len(lines) {
+			continue
+		}
+		lines[idx] = centerLine(line, width)
+	}
+	return strings.Join(lines[:height], "\n")
+}
+
+func centerLine(line string, width int) string {
+	w := ui.DisplayWidth(line)
+	if w >= width {
+		return line
+	}
+	pad := width - w
+	left := pad / 2
+	return strings.Repeat(" ", left) + line + strings.Repeat(" ", pad-left)
 }
 
 func (m Model) body() string {
@@ -460,7 +543,7 @@ func (m Model) body() string {
 
 // stackedLines draws the list, a rule, then a preview clipped to the rows left.
 func (m Model) stackedLines(vis []Row, cursor int, preview string, leftW, markW, width, budget int) []string {
-	fitted := previewLines(preview, width)
+	fitted := ensureBlankBeforeRan(previewLines(preview, width))
 	listBudget := budget
 	previewBudget := 0
 	if len(fitted) > 0 {
@@ -542,7 +625,7 @@ func (m Model) renderList(rows []Row, highlight, lineW, markW, paneW int) []stri
 		line := padDisplay(mark+m.line(r, listLineWidth(lineW, markW), statusWidth(rows)), paneW)
 		if i == highlight && !r.Gap {
 			line = m.styles.Select.Render(line)
-		} else if r.Gap || r.Status == "undone" || r.Status == "kept" {
+		} else if r.Gap {
 			line = m.styles.Muted.Render(line)
 		}
 		out = append(out, line)
@@ -569,14 +652,20 @@ func (m Model) line(r Row, width, statusW int) string {
 		}
 		return padDisplay(ui.Truncate(s, room), room) + rightCol("", fileColWidth) + strings.Repeat(" ", statusGap) + rightCol("", statusW)
 	}
-	prefix := fmt.Sprintf(" #%-4d %-7s %-11s ", r.Seq, ui.Pad(r.Agent, 7), ui.Pad(r.When, 11))
+	agent := ui.Paint(m.styles.Muted, ui.Pad(r.Agent, 7))
+	when := ui.Paint(m.styles.Muted, ui.Pad(r.When, 11))
+	prefix := fmt.Sprintf(" #%-4d %s %s ", r.Seq, agent, when)
 	file := rightCol(ui.Plural(r.Files, "file", "files"), fileColWidth)
+	delta := m.fileDelta(r)
 	statusText := rowStatus(r.Status)
+	if statusText == "undone" || statusText == "partial" {
+		statusText = ui.Paint(m.styles.Warning, statusText)
+	}
 	if ui.DisplayWidth(statusText) > statusW {
 		statusText = ui.Truncate(statusText, statusW)
 	}
 	status := rightCol(statusText, statusW)
-	tail := file + strings.Repeat(" ", statusGap) + status
+	tail := file + delta + strings.Repeat(" ", statusGap) + status
 	promptWidth := width - ui.DisplayWidth(prefix) - ui.DisplayWidth(tail)
 	if promptWidth < 0 {
 		promptWidth = 0
@@ -609,6 +698,15 @@ func promptField(prompt string, width int) string {
 		quoted = ui.Truncate(quoted, width)
 	}
 	return padDisplay(quoted, width)
+}
+
+func (m Model) fileDelta(r Row) string {
+	if r.Insertions == 0 && r.Deletions == 0 {
+		return ""
+	}
+	plus := ui.Paint(m.styles.Success, fmt.Sprintf("+%d", r.Insertions))
+	minus := ui.Paint(m.styles.Danger, fmt.Sprintf("%s%d", m.sym.Minus, r.Deletions))
+	return " " + plus + " " + minus
 }
 
 func rightCol(s string, width int) string {
@@ -763,6 +861,21 @@ func rowStatus(status string) string {
 	}
 }
 
+func ensureBlankBeforeRan(lines []string) []string {
+	for i, line := range lines {
+		if !strings.Contains(line, "ran:") {
+			continue
+		}
+		if i > 0 && strings.TrimSpace(lines[i-1]) == "" {
+			return lines
+		}
+		out := append([]string{}, lines[:i]...)
+		out = append(out, "")
+		return append(out, lines[i:]...)
+	}
+	return lines
+}
+
 func previewLines(preview string, width int) []string {
 	if strings.TrimSpace(preview) == "" {
 		return nil
@@ -817,11 +930,14 @@ func clipPreview(lines []string, max int) []string {
 			mid = mid[:len(mid)-1]
 		}
 	}
-	// Keep at most the first ran line once the block is taller than the budget.
+	// Keep the ran line, with the blank line that separates it from the paths.
 	var keptTail []string
 	for _, line := range tail {
 		if strings.TrimSpace(line) == "" {
 			continue
+		}
+		if strings.Contains(line, "ran:") {
+			keptTail = append(keptTail, "")
 		}
 		keptTail = append(keptTail, line)
 		break
@@ -872,6 +988,11 @@ func clipPreview(lines []string, max int) []string {
 		keep = len(mid)
 	}
 	k := extra + len(mid) - keep
+	// "+1 more" would spend a row hiding the one file that row could show.
+	if k == 1 && keep < len(mid) {
+		keep++
+		k = extra + len(mid) - keep
+	}
 	kept := append([]string(nil), mid[:keep]...)
 	if k > 0 {
 		kept = append(kept, moreLineText(k, mid))
