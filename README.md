@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <strong>Ctrl+Z for Agent.</strong><br>
+  <strong>Ctrl+Z for Agent: precise undo & redo in one step.</strong><br>
   Undo anything Claude Code, Codex, Gemini or Cursor did to your files. Even <code>rm -rf</code>.
 </p>
 
