@@ -122,7 +122,7 @@ oops init
 `npx` works the same way:
 
 ```sh
-npx @lintsinghua/oops
+npx @lintsinghua/oops init
 ```
 
 The wrapper depends on one optional package per platform (`@lintsinghua/oops-linux-x64` and the other os/cpu builds). Each of those packages carries the binary, with `os` and `cpu` set. npm installs the match. Nothing is downloaded from a postinstall script.

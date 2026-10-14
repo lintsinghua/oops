@@ -122,7 +122,7 @@ oops init
 `npx` 同样可用：
 
 ```sh
-npx @lintsinghua/oops
+npx @lintsinghua/oops init
 ```
 
 主包通过 optionalDependencies 带上每个平台一个包（例如 `@lintsinghua/oops-linux-x64`），包里直接放二进制，并写好 `os` 和 `cpu`。npm 只会装上匹配的那一个。postinstall 不会再下载文件。
