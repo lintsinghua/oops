@@ -124,7 +124,14 @@ func TestHotScanReusesObjects(t *testing.T) {
 	if after != before {
 		t.Fatalf("hot scan grew objects %d -> %d", before, after)
 	}
-	if elapsed > 2*time.Second {
+	// Object count is the cache-hit check. The clock bound only catches a hang.
+	// Under -race a hit of these 400 files took 2.1s on windows-latest
+	// (Go 1.27.2) while the store size stayed the same.
+	limit := 2 * time.Second
+	if raceEnabled {
+		limit = 8 * time.Second
+	}
+	if elapsed > limit {
 		t.Fatalf("hot scan took %s", elapsed)
 	}
 }
