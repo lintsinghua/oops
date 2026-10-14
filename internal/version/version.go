@@ -4,6 +4,7 @@ package version
 import (
 	"fmt"
 	"runtime/debug"
+	"strings"
 )
 
 // Version, Commit, and Date are replaced at link time.
@@ -25,7 +26,8 @@ type Info struct {
 
 // Current returns the metadata linked into this binary.
 // A release build's -ldflags win. Otherwise Main.Version is used when it
-// is a real module version, and vcs.revision is used for the commit.
+// is a real module version, with one leading "v" removed so it matches
+// release builds, and vcs.revision is used for the commit.
 func Current() Info {
 	info, ok := debug.ReadBuildInfo()
 	if !ok {
@@ -65,7 +67,7 @@ func moduleVersion(info *debug.BuildInfo) string {
 	if v == "" || v == "(devel)" {
 		return ""
 	}
-	return v
+	return strings.TrimPrefix(v, "v")
 }
 
 func setting(info *debug.BuildInfo, key string) string {

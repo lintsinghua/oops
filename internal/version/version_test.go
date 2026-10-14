@@ -20,10 +20,10 @@ func TestCurrentReadsLinkMetadata(t *testing.T) {
 
 func TestGoInstallVersionFromBuildInfo(t *testing.T) {
 	info := &debug.BuildInfo{}
-	info.Main.Version = "v0.1.0"
+	info.Main.Version = "v0.1.1"
 	info.Settings = []debug.BuildSetting{{Key: "vcs.revision", Value: "abc123def"}}
 	got := fromBuildInfo("dev", "none", "unknown", info)
-	if got.Version != "v0.1.0" || got.Commit != "abc123def" || got.Date != "unknown" {
+	if got.Version != "0.1.1" || got.Commit != "abc123def" || got.Date != "unknown" {
 		t.Fatalf("fromBuildInfo() = %+v", got)
 	}
 }
