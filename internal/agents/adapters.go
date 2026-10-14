@@ -23,6 +23,9 @@ type Agent struct {
 	Uninstall func(path string) (Change, bool, error)
 	SlashNote string
 	TrustNote string
+	// EndEvents are the hooks that close a turn. They stay synchronous so the
+	// agent does not exit before the turn is marked ended.
+	EndEvents []string
 }
 
 // Agents is the v1 adapter list, in display order.
@@ -54,6 +57,7 @@ func Claude() Agent {
 			return filepath.Join(home, ".claude", "settings.json")
 		},
 		SlashNote: "/oops ready",
+		EndEvents: claudeEndEvents,
 		Install: func(exe, path string, write bool) (Change, bool, error) {
 			doc, prev, err := ReadJSON(path)
 			if err != nil {
@@ -63,11 +67,12 @@ func Claude() Agent {
 				"SessionStart":        {commandAsync(exe, []string{"hook", "claude", "session-start"})},
 				"UserPromptSubmit":    {commandTimeout(exe, []string{"hook", "claude", "turn-start"}, 15)},
 				"UserPromptExpansion": {commandMatch(exe, []string{"hook", "claude", "slash"}, "oops")},
-				"Stop":                {commandAsync(exe, []string{"hook", "claude", "turn-end"})},
-				"StopFailure":         {commandAsync(exe, []string{"hook", "claude", "turn-end"})},
-				"SubagentStop":        {commandAsync(exe, []string{"hook", "claude", "subagent-stop"})},
+				"Stop":                {commandSync(exe, []string{"hook", "claude", "turn-end"})},
+				"StopFailure":         {commandSync(exe, []string{"hook", "claude", "turn-end"})},
+				"SubagentStop":        {commandSync(exe, []string{"hook", "claude", "subagent-stop"})},
 			}
-			if !EnsureHooks(doc, groups) && Connected(doc) {
+			synced := ClearAsync(doc, claudeEndEvents)
+			if !EnsureHooks(doc, groups) && !synced && Connected(doc) {
 				return Change{Path: path, Before: prev, After: prev}, false, nil
 			}
 			return finishWrite(path, doc, prev, write)
@@ -84,6 +89,7 @@ func Codex() Agent {
 		Binary:    []string{"codex"},
 		Docs:      "https://developers.openai.com/codex/hooks",
 		TrustNote: "open Codex and run /hooks once to trust oops",
+		EndEvents: codexEndEvents,
 		Config: func(home, project string, projectLevel bool) string {
 			if projectLevel {
 				return filepath.Join(project, ".codex", "hooks.json")
@@ -104,7 +110,8 @@ func Codex() Agent {
 				"Stop":             {shellHook(cmd+" turn-end", 15, "")},
 				"Interrupt":        {shellHook(cmd+" turn-end", 3, "")},
 			}
-			if !EnsureHooks(doc, groups) && Connected(doc) {
+			synced := ClearAsync(doc, codexEndEvents)
+			if !EnsureHooks(doc, groups) && !synced && Connected(doc) {
 				return Change{Path: path, Before: prev, After: prev}, false, nil
 			}
 			return finishWrite(path, doc, prev, write)
@@ -117,9 +124,10 @@ func Codex() Agent {
 // Docs: https://geminicli.com/docs/hooks/reference/
 func Gemini() Agent {
 	return Agent{
-		Name:   "Gemini CLI",
-		Binary: []string{"gemini"},
-		Docs:   "https://geminicli.com/docs/hooks/reference/",
+		Name:      "Gemini CLI",
+		Binary:    []string{"gemini"},
+		Docs:      "https://geminicli.com/docs/hooks/reference/",
+		EndEvents: geminiEndEvents,
 		Config: func(home, project string, projectLevel bool) string {
 			if projectLevel {
 				return filepath.Join(project, ".gemini", "settings.json")
@@ -136,7 +144,8 @@ func Gemini() Agent {
 				"BeforeAgent": {namedHook("oops-turn-start", cmd+" turn-start", 15000)},
 				"AfterAgent":  {namedHook("oops-turn-end", cmd+" turn-end", 15000)},
 			}
-			if !EnsureHooks(doc, groups) && Connected(doc) {
+			synced := ClearAsync(doc, geminiEndEvents)
+			if !EnsureHooks(doc, groups) && !synced && Connected(doc) {
 				return Change{Path: path, Before: prev, After: prev}, false, nil
 			}
 			return finishWrite(path, doc, prev, write)
@@ -153,6 +162,7 @@ func Cursor() Agent {
 		Binary:    []string{"cursor-agent", "agent"},
 		Docs:      "https://cursor.com/docs/hooks",
 		SlashNote: "shell escape: !oops undo",
+		EndEvents: cursorEndEvents,
 		Config: func(home, project string, projectLevel bool) string {
 			if projectLevel {
 				return filepath.Join(project, ".cursor", "hooks.json")
@@ -174,7 +184,8 @@ func Cursor() Agent {
 				"beforeShellExecution": {FlatCommand(cmd + " step")},
 				"afterFileEdit":        {FlatCommand(cmd + " step")},
 			}
-			if !ensureCursor(doc, groups) && Connected(doc) {
+			synced := ClearAsync(doc, cursorEndEvents)
+			if !ensureCursor(doc, groups) && !synced && Connected(doc) {
 				return Change{Path: path, Before: prev, After: prev}, false, nil
 			}
 			return finishWrite(path, doc, prev, write)
@@ -204,12 +215,23 @@ func ensureCursor(doc map[string]any, groups map[string][]map[string]any) bool {
 	return changed
 }
 
+var (
+	claudeEndEvents = []string{"Stop", "StopFailure", "SubagentStop"}
+	codexEndEvents  = []string{"Stop", "Interrupt"}
+	geminiEndEvents = []string{"AfterAgent"}
+	cursorEndEvents = []string{"stop"}
+)
+
 func commandTimeout(exe string, args []string, timeout int) map[string]any {
 	return CommandGroup(exe, args, timeout, false, "", "")
 }
 
 func commandAsync(exe string, args []string) map[string]any {
 	return CommandGroup(exe, args, 0, true, "", "")
+}
+
+func commandSync(exe string, args []string) map[string]any {
+	return CommandGroup(exe, args, 0, false, "", "")
 }
 
 func commandMatch(exe string, args []string, matcher string) map[string]any {
@@ -410,6 +432,7 @@ func Detect(a Agent, home, project string, projectLevel bool, pathExtra []string
 		inst.InvalidMsg = err.Error()
 	} else {
 		inst.Connected = Connected(doc)
+		inst.Stale = HasAsyncEndHook(doc, a.EndEvents)
 	}
 	return inst
 }
