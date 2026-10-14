@@ -187,7 +187,9 @@ func RemoveOops(v any) (any, bool) {
 			if ch {
 				changed = true
 			}
-			if next == nil {
+			// A nil slice is not a nil interface, and encoding/json writes it
+			// as null. Drop empty events instead of leaving "Stop": null.
+			if next == nil || dropEmpty(next) {
 				delete(t, k)
 				changed = true
 				continue
@@ -196,7 +198,7 @@ func RemoveOops(v any) (any, bool) {
 		}
 		return t, changed
 	case []any:
-		var out []any
+		out := make([]any, 0)
 		changed := false
 		for _, child := range t {
 			next, ch := RemoveOops(child)

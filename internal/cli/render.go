@@ -30,6 +30,10 @@ func renderUndo(w io.Writer, opt *options, res engine.UndoResult, verb string) {
 	if opt.quiet {
 		return
 	}
+	if writtenCount(res.Effects) == 0 && res.Result == "partial" {
+		renderNothingWritten(w, opt, res)
+		return
+	}
 	st, sym := stylesOf(opt)
 	title := fmt.Sprintf("%s Undid turn #%d", sym.OK, res.Turn.Seq)
 	if res.Turn.Agent != "" {
@@ -82,6 +86,9 @@ func writeUndoJSON(w io.Writer, res engine.UndoResult) {
 		"redo":           "oops redo",
 		"dry_run":        res.DryRun,
 	}
+	if writtenCount(res.Effects) == 0 && res.Result == "partial" {
+		out["note"] = "Nothing was written."
+	}
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(out)
@@ -111,6 +118,35 @@ func keptOf(effects []engine.Effect) []map[string]string {
 		out = []map[string]string{}
 	}
 	return out
+}
+
+func renderNothingWritten(w io.Writer, opt *options, res engine.UndoResult) {
+	st, sym := stylesOf(opt)
+	fmt.Fprintln(w, st.Success.Render(fmt.Sprintf("%s Nothing was written.", sym.Warn)))
+	fmt.Fprintln(w)
+	for _, line := range groupLines(res.Effects, true) {
+		fmt.Fprintln(w, "  "+line)
+	}
+	if res.Turn.Seq > 0 {
+		fmt.Fprintln(w)
+		for _, ef := range res.Effects {
+			if ef.Op == "kept" || ef.Op == "unprotected" {
+				fmt.Fprintf(w, "  Undo it too (your version is saved):  oops undo %d --file %s --force\n", res.Turn.Seq, ef.Path)
+			}
+		}
+	}
+	fmt.Fprintln(w)
+}
+
+func writtenCount(effects []engine.Effect) int {
+	n := 0
+	for _, ef := range effects {
+		switch ef.Op {
+		case "restore", "remove", "revert":
+			n++
+		}
+	}
+	return n
 }
 
 func countOp(effects []engine.Effect, op string) int {

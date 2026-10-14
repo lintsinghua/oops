@@ -70,12 +70,17 @@ Checked against `docs/PRD.md` on 2026-10-13. PASS means a test or command named 
 | §6.4 | PASS | `docs/commands.md`, `TestCommandReference` | Command help is generated from cobra. README, README.zh-CN, how-it-works, and schema.md are in the repo |
 | §6.1 matrix | PASS | `.github/workflows/ci.yml`, `internal/agents/testdata`, `scripts/covergate.py` | ubuntu-latest and ubuntu-24.04-arm (ext4), ubuntu-latest tmpfs, macos-latest and macos-15-intel (case-insensitive APFS), windows-latest and windows-11-arm (NTFS). Go 1.27.2 and 1.26.9. Coverage gate is 70% overall and 85% for store, snapshot, and restore. Hook fixtures drive `oops hook` in agent event order. macos-13 is no longer a hosted runner, so the Intel macOS leg is macos-15-intel. `-race` runs on every leg except windows-11-arm, where Go reports that the race detector is not supported |
 | §6.2 cold start and RSS | PASS | `TestColdStart10k`, `TestScanRSS100k` | Cold start of 10,000 files / 300,000,000 bytes was 0.69 s (limit 3 s). Peak VmRSS while scanning 100,000 files was 119.5 MiB, 125,341,696 bytes (limit 150 MB). One sample each, 2026-10-13, 4 vCPU, Linux |
+| BUG-1 redo yields to a newer turn | PASS | `TestUndoAfterRedoThenNewTurn` | `undo`, `redo`, a new turn, then `undo`, with and without a user edit. The new turn is undone. The redone turn stays applied. Output does not say turn #0 |
+| BUG-2 reported writes match disk | PASS | `TestUndoAfterRedoReportsRealWrites` | The same chain, plus `undo` of a redo after a user edit. The printed file count equals the files written. When nothing is written the command says so and exits 3 |
+| BUG-3 Cursor workspace root | PASS | `TestCursorHookUsesWorkspaceRoot` | User-hook cwd `~/.cursor` is not the workspace. `workspace_roots` and `CURSOR_PROJECT_DIR` are. Several roots follow `CURSOR_PROJECT_DIR` |
+| BUG-4 init undo restores hooks | PASS | `TestInitUndoRestoresUserHooks` | Codex and Gemini configs that already had user hooks come back byte-for-byte. `*.oops-backup-*` files are removed. Event keys are not null |
+| BUG-5 agent version token | PASS | `TestVersionSkipsBanner` | A semver token is read from stdout. A stderr warning and a stdout banner are ignored |
 
 ## Counts
 
 | Result | Rows |
 |---|---|
-| PASS | 66 |
+| PASS | 71 |
 | FAIL | 0 |
 
 ## Out of v1 scope / pending external action

@@ -55,7 +55,15 @@ func (e *Engine) Undo(ctx context.Context, req UndoRequest) (UndoResult, error) 
 	}
 	if req.Seq == 0 && len(req.Files) == 0 {
 		if op, err := e.DB.LatestStackOp(req.Workspace.ID); err == nil && !op.Applied {
-			return e.reapply(ctx, req.Workspace, op, req.DryRun)
+			// A turn that finished after this redo is newer. Drop the redo
+			// record so plain undo targets that turn.
+			if e.redoSuperseded(req.Workspace, op) {
+				if err := e.DB.DiscardUnapplied(req.Workspace.ID); err != nil {
+					return UndoResult{}, err
+				}
+			} else {
+				return e.reapply(ctx, req.Workspace, op, req.DryRun)
+			}
 		}
 	}
 	t, err := e.turnForUndo(ctx, req)
@@ -327,7 +335,8 @@ func (e *Engine) Redo(ctx context.Context, ws Workspace, dry bool) (UndoResult, 
 		items = append(items, restore.Item{Path: ef.Path, Op: opName, Before: now, Want: ef.Before, After: ef.Before})
 	}
 	res := UndoResult{Result: resultOf(items), Effects: effects(items), Seqs: op.Targets, DryRun: dry}
-	if dry || hasKept(items) {
+	e.attachTurn(ws, &res)
+	if dry || !hasWritable(items) {
 		return res, nil
 	}
 	if err := e.apply(ctx, ws, "redo", op.Targets, curSnap.ID, items, false, false); err != nil {
@@ -388,7 +397,8 @@ func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool
 		}
 	}
 	res := UndoResult{Result: resultOf(items), Effects: effects(items), Seqs: op.Targets, DryRun: dry}
-	if dry || hasKept(items) {
+	e.attachTurn(ws, &res)
+	if dry || !hasWritable(items) {
 		return res, nil
 	}
 	if err := e.restoreItems(ws, restore.Journal{
@@ -399,7 +409,7 @@ func (e *Engine) reapply(ctx context.Context, ws Workspace, op meta.Op, dry bool
 	if err := e.DB.SetOpApplied(op.ID, true); err != nil {
 		return res, err
 	}
-	if op.Type != "restore" {
+	if !hasKept(items) && op.Type != "restore" {
 		for _, seq := range op.Targets {
 			if t, err := e.DB.GetTurn(ws.ID, seq); err == nil {
 				_ = e.DB.SetStatus(t.ID, "undone")
@@ -584,6 +594,44 @@ func hasKept(items []restore.Item) bool {
 	return false
 }
 
+func hasWritable(items []restore.Item) bool {
+	for _, it := range items {
+		switch it.Op {
+		case "restore", "remove", "revert":
+			return true
+		}
+	}
+	return false
+}
+
+// redoSuperseded is true when a finished turn is newer than every turn this
+// redo would put back. Plain undo must target that turn.
+func (e *Engine) redoSuperseded(ws Workspace, op meta.Op) bool {
+	latest, err := e.DB.LatestUndoable(ws.ID)
+	if err != nil {
+		return false
+	}
+	max := 0
+	for _, seq := range op.Targets {
+		if seq > max {
+			max = seq
+		}
+	}
+	return latest.Seq > max
+}
+
+func (e *Engine) attachTurn(ws Workspace, res *UndoResult) {
+	if res == nil || len(res.Seqs) == 0 {
+		return
+	}
+	seq := res.Seqs[len(res.Seqs)-1]
+	if t, err := e.DB.GetTurn(ws.ID, seq); err == nil {
+		res.Turn = t
+		return
+	}
+	res.Turn = meta.Turn{Seq: seq}
+}
+
 // RunningError means the turn is still open.
 type RunningError struct{ Turn meta.Turn }
 
@@ -610,7 +658,14 @@ func (e *Engine) ManualSnap(ctx context.Context, ws Workspace, message string) (
 		WS: ws.ID, Agent: "you", Kind: "manual", Prompt: SummarizePrompt(message, true, 200),
 		StartedAt: e.Now, EndedAt: e.Now, Status: "done", PreSnap: snap.ID, PostSnap: snap.ID,
 	}
-	return e.DB.InsertTurn(t)
+	inserted, err := e.DB.InsertTurn(t)
+	if err != nil {
+		return inserted, err
+	}
+	if err := e.DB.DiscardUnapplied(ws.ID); err != nil {
+		return inserted, err
+	}
+	return inserted, nil
 }
 
 // ChangesBetween loads the diff for a turn.

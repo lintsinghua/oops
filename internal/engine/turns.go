@@ -54,7 +54,15 @@ func (e *Engine) StartTurn(ctx context.Context, in TurnInput) (meta.Turn, error)
 		StartedAt: e.Now, Status: "running", PreSnap: snap.ID,
 		Stats: meta.Stats{Overlaps: overlaps},
 	}
-	return e.DB.InsertTurn(t)
+	inserted, err := e.DB.InsertTurn(t)
+	if err != nil {
+		return inserted, err
+	}
+	// A new turn makes an earlier redo stale. Drop it so plain undo targets this turn.
+	if err := e.DB.DiscardUnapplied(in.Workspace.ID); err != nil {
+		return inserted, err
+	}
+	return inserted, nil
 }
 
 // CloseTurn captures the post snapshot for the running session turn.
