@@ -57,7 +57,7 @@ oops works one level lower, at the file system. Whatever the agent used — its 
 
 ## Install
 
-Each method checks the download, installs without sudo, and prints the same next step: `oops init`.
+Whichever method you use, run `oops init` after installing.
 
 ### Script
 
@@ -67,12 +67,14 @@ macOS and Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
+oops init
 ```
 
 Windows (PowerShell):
 
 ```powershell
 irm https://raw.githubusercontent.com/lintsinghua/oops/main/install.ps1 | iex
+oops init
 ```
 
 `OOPS_VERSION` selects a release (`0.1.0` or `v0.1.0`; the default is the latest release). `OOPS_INSTALL_DIR` changes the destination. If that directory is not on `PATH`, the script prints a one-line command to add it. Running the script again upgrades in place and prints `upgraded from X to Y`.
@@ -97,9 +99,8 @@ Remove-Item -Force "$env:USERPROFILE\.local\bin\oops.exe"
 
 ```sh
 brew install lintsinghua/tap/oops
+oops init
 ```
-
-A tagged release pushes the formula to `lintsinghua/homebrew-tap` with GoReleaser (`HOMEBREW_TAP_TOKEN`). That tap repository has to exist before the first release; this repo does not create it.
 
 Uninstall:
 
@@ -115,6 +116,7 @@ The npm name `oops` is already registered, so the package is `@lintsinghua/oops`
 
 ```sh
 npm i -g @lintsinghua/oops
+oops init
 ```
 
 `npx` works the same way:
@@ -123,7 +125,7 @@ npm i -g @lintsinghua/oops
 npx @lintsinghua/oops
 ```
 
-The wrapper depends on one optional package per platform (`@lintsinghua/oops-linux-x64` and the other os/cpu builds). Each of those packages carries the binary, with `os` and `cpu` set. npm installs the match. Nothing is downloaded from a postinstall script. The release workflow publishes the packages with `NPM_TOKEN`.
+The wrapper depends on one optional package per platform (`@lintsinghua/oops-linux-x64` and the other os/cpu builds). Each of those packages carries the binary, with `os` and `cpu` set. npm installs the match. Nothing is downloaded from a postinstall script.
 
 Uninstall:
 
@@ -137,6 +139,7 @@ npm uninstall -g @lintsinghua/oops
 
 ```sh
 go install github.com/lintsinghua/oops/cmd/oops@latest
+oops init
 ```
 
 Uninstall:

@@ -218,7 +218,7 @@
 ### 6.5 “可开源”发布检查清单（v0.1 发布前必须全部打勾）
 
 - [ ] `LICENSE`：**MIT**（建议，与 gh、lazygit、Charm 生态一致，摩擦最小；如果担心专利问题可改 Apache-2.0，二选一，不要双许可）
-- [ ] `README.md` 和 `README.en.md`，包含 GIF、徽章（CI、release、license、Go Report Card）
+- [ ] `README.md` 和 `README.en.md`，包含 GIF、徽章（Go、Platforms、Agents、Release、License）
 - [ ] `CONTRIBUTING.md`：开发环境、`make test`、提交规范（Conventional Commits）、如何新增 Agent 适配器（附模板）、DCO 或 CLA 二选一（建议 DCO）
 - [ ] `CODE_OF_CONDUCT.md`：Contributor Covenant 2.1
 - [ ] `SECURITY.md`：开启 GitHub Private Vulnerability Reporting，承诺 72 小时内响应；写明支持的版本

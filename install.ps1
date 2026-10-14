@@ -4,8 +4,7 @@ $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
 function Fail([string]$Message) {
-	[Console]::Error.WriteLine($Message)
-	exit 1
+	throw $Message
 }
 
 function Strip-TrailingSlash([string]$Path) {
@@ -128,7 +127,29 @@ try {
 	if ($hits.Count -lt 1) { Fail "archive does not contain $BinName" }
 
 	New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-	Copy-Item -LiteralPath $hits[0].FullName -Destination $Dest -Force
+	# A running oops.exe cannot be overwritten. Write the new bytes beside it,
+	# rename the running file out of the way, then rename the new file into place.
+	$staged = Join-Path $InstallDir ($BinName + ".new")
+	Copy-Item -LiteralPath $hits[0].FullName -Destination $staged -Force
+	if (Test-Path -LiteralPath $Dest) {
+		$old = Join-Path $InstallDir ($BinName + ".old")
+		if (Test-Path -LiteralPath $old) {
+			Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+		}
+		if (Test-Path -LiteralPath $old) {
+			$old = Join-Path $InstallDir ($BinName + ".old." + [guid]::NewGuid().ToString("n"))
+		}
+		Move-Item -LiteralPath $Dest -Destination $old -Force
+		try {
+			Move-Item -LiteralPath $staged -Destination $Dest -Force
+		} catch {
+			Move-Item -LiteralPath $old -Destination $Dest -Force -ErrorAction SilentlyContinue
+			throw
+		}
+		Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue
+	} else {
+		Move-Item -LiteralPath $staged -Destination $Dest -Force
+	}
 } finally {
 	Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
