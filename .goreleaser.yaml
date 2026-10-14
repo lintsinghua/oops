@@ -44,3 +44,19 @@ changelog:
 
 release:
   prerelease: auto
+
+brews:
+  - name: oops
+    repository:
+      owner: lintsinghua
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/lintsinghua/oops"
+    description: "Undo and redo file changes made by coding agents"
+    license: MIT
+    caveats: oops init
+    install: |
+      bin.install "oops"
+    test: |
+      system "#{bin}/oops", "version"

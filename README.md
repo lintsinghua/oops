@@ -35,7 +35,7 @@
 </p>
 
 ```sh
-go install github.com/lintsinghua/oops/cmd/oops@latest
+curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
 oops init                         # connect your agents once — then forget about it
 ```
 
@@ -57,12 +57,95 @@ oops works one level lower, at the file system. Whatever the agent used — its 
 
 ## Install
 
-| | |
-|---|---|
-| Go | `go install github.com/lintsinghua/oops/cmd/oops@latest` |
-| Releases | [GitHub Releases](https://github.com/lintsinghua/oops/releases) — macOS, Linux, Windows · amd64 / arm64 |
+Each method checks the download, installs without sudo, and prints the same next step: `oops init`.
 
-Homebrew, npm and an install script are coming soon.
+### Script
+
+This is the one to use. It downloads the matching [GitHub Release](https://github.com/lintsinghua/oops/releases) archive (macOS, Linux, Windows · amd64 / arm64), checks its SHA-256 against `checksums.txt`, and installs the binary to `~/.local/bin`. A checksum mismatch exits non-zero and leaves the previous binary in place.
+
+macOS and Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
+```
+
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/lintsinghua/oops/main/install.ps1 | iex
+```
+
+`OOPS_VERSION` selects a release (`0.1.0` or `v0.1.0`; the default is the latest release). `OOPS_INSTALL_DIR` changes the destination. If that directory is not on `PATH`, the script prints a one-line command to add it. Running the script again upgrades in place and prints `upgraded from X to Y`.
+
+Uninstall:
+
+```sh
+oops init --undo
+oops gc --all --global
+rm -f "${OOPS_INSTALL_DIR:-$HOME/.local/bin}/oops"
+```
+
+Windows (PowerShell):
+
+```powershell
+oops init --undo
+oops gc --all --global
+Remove-Item -Force "$env:USERPROFILE\.local\bin\oops.exe"
+```
+
+### Homebrew
+
+```sh
+brew install lintsinghua/tap/oops
+```
+
+A tagged release pushes the formula to `lintsinghua/homebrew-tap` with GoReleaser (`HOMEBREW_TAP_TOKEN`). That tap repository has to exist before the first release; this repo does not create it.
+
+Uninstall:
+
+```sh
+oops init --undo
+oops gc --all --global
+brew uninstall oops
+```
+
+### npm
+
+The npm name `oops` is already registered, so the package is `@lintsinghua/oops`.
+
+```sh
+npm i -g @lintsinghua/oops
+```
+
+`npx` works the same way:
+
+```sh
+npx @lintsinghua/oops
+```
+
+The wrapper depends on one optional package per platform (`@lintsinghua/oops-linux-x64` and the other os/cpu builds). Each of those packages carries the binary, with `os` and `cpu` set. npm installs the match. Nothing is downloaded from a postinstall script. The release workflow publishes the packages with `NPM_TOKEN`.
+
+Uninstall:
+
+```sh
+oops init --undo
+oops gc --all --global
+npm uninstall -g @lintsinghua/oops
+```
+
+### Go
+
+```sh
+go install github.com/lintsinghua/oops/cmd/oops@latest
+```
+
+Uninstall:
+
+```sh
+oops init --undo
+oops gc --all --global
+rm -f "$(go env GOPATH)/bin/oops"
+```
 
 ## 30-second start
 
@@ -270,7 +353,7 @@ The same `go test -race ./...` job runs on Linux, macOS, and Windows in CI, incl
 <details>
 <summary><strong>How do I uninstall?</strong></summary>
 
-`oops init --undo` removes the hooks (your other settings stay untouched), `oops gc --all --global` deletes the snapshots, then delete `$(go env GOPATH)/bin/oops`.
+`oops init --undo` removes the hooks (your other settings stay untouched) and `oops gc --all --global` deletes the snapshots. Then remove the binary the way [Install](#install) describes for the method you used.
 </details>
 
 ## Contributing

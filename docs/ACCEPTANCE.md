@@ -130,7 +130,7 @@ These are not FAIL. G1–G10 are v0.2 in the PRD and are not implemented. The ot
 |---|---|
 | G1–G10 | PRD marks them v0.2 (step checkpoints, richer TUI, context sync, branch export, web, MCP, encryption, reflink, team policy, diff highlighting) |
 | cosign, SBOM, SLSA | Signing and provenance are release infrastructure. This repo's goreleaser config does not emit them |
-| Homebrew, npm, scoop, winget, curl install | Planned install channels. The live paths are `go install` and GitHub Releases |
+| Homebrew tap repo, npm publish token, scoop, winget | The formula, npm packages, and curl/PowerShell installers are in the repo. The first release still needs the `lintsinghua/homebrew-tap` repository, `HOMEBREW_TAP_TOKEN`, and `NPM_TOKEN`. Scoop and winget are not implemented |
 | Three-person user study | Needs three people on three operating systems. Not something this change can record |
 | CHANGELOG generated at tag time | Keep-a-changelog output is a release step |
 | Live Claude Code, Codex, Gemini CLI, and Cursor CLI smoke | Run manually by a maintainer before release; CI replays recorded hook payloads |

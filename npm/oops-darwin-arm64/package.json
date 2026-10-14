@@ -1,0 +1,17 @@
+{
+  "name": "@lintsinghua/oops-darwin-arm64",
+  "version": "0.1.0",
+  "description": "darwin arm64 binary for @lintsinghua/oops.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lintsinghua/oops.git",
+    "directory": "npm/oops-darwin-arm64"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"],
+  "files": ["bin/oops"],
+  "publishConfig": {
+    "access": "public"
+  }
+}

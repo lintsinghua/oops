@@ -26,9 +26,9 @@
 oops — Ctrl+Z for coding agents.
 Undo anything Claude Code, Codex, Gemini or Cursor did to your files. Even rm -rf.
 
-  brew install oops-cli/tap/oops   ·   npm i -g @oops-cli/oops   ·   curl -fsSL https://oops.sh/install | sh
+  brew install lintsinghua/tap/oops   ·   npm i -g @lintsinghua/oops   ·   curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh
 ```
-（计划中的渠道。org、scope、域名均为占位，待注册后替换。当前 README 只提供 `go install github.com/lintsinghua/oops/cmd/oops@latest` 和 GitHub Releases。）
+（README 的安装顺序是脚本、Homebrew、`npm i -g @lintsinghua/oops`、`go install`。npm 上的 `oops` 已被占用，所以用 scope。`lintsinghua/homebrew-tap` 需要在第一次发版前建好。）
 
 **安装**：三种渠道安装完成后的最后一句提示**完全一致**，只指向唯一的下一步：
 
@@ -970,12 +970,12 @@ checksum: { name_template: checksums.txt }
 sboms: [{ artifacts: archive }]
 signs: [{ cmd: cosign, artifacts: checksum, args: ["sign-blob", "--output-signature=${signature}", "${artifact}", "--yes"] }]
 nfpms: [{ formats: [deb, rpm, apk], bindir: /usr/bin }]
-brews: [{ repository: { owner: oops-cli, name: homebrew-tap }, caveats: "Next: run `oops init` to protect your agents." }]
+brews: [{ repository: { owner: lintsinghua, name: homebrew-tap, token: "{{ .Env.HOMEBREW_TAP_TOKEN }}" }, directory: Formula, caveats: "oops init" }]
 scoops: [{ repository: { owner: oops-cli, name: scoop-bucket } }]
 winget: [{ publisher: oops-cli, repository: { owner: oops-cli, name: winget-pkgs } }]
 changelog: { use: github, groups: [{ title: Features, regexp: '^feat' }, { title: Fixes, regexp: '^fix' }] }
 ```
-- npm 分发：`@oops-cli/oops`（主包，含 JS shim 和 postinstall 提示）加上 `@oops-cli/oops-<os>-<arch>` 平台包（optionalDependencies，esbuild 模式），由 release 工作流在 goreleaser 之后发布。
+- npm 分发：`@lintsinghua/oops`（主包，含 JS shim 和 postinstall 提示）加上 `@lintsinghua/oops-<os>-<cpu>` 平台包（optionalDependencies，esbuild 模式），由 release 工作流在 goreleaser 之后用 `NPM_TOKEN` 发布。未加 scope 的 `oops` 已在 registry 上存在。
 - GitHub Actions：`ci.yml`（PR：lint/test/e2e，三平台）、`bench.yml`（nightly）、`release.yml`（tag 触发：goreleaser，加 `actions/attest-build-provenance`，再发布 npm），`scorecard.yml`。
 
 ## 附录 B：演示脚本（vhs）

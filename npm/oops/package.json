@@ -1,0 +1,39 @@
+{
+  "name": "@lintsinghua/oops",
+  "version": "0.1.0",
+  "description": "Ctrl+Z for Agent: precise undo and redo in one step.",
+  "license": "MIT",
+  "homepage": "https://github.com/lintsinghua/oops",
+  "bugs": {
+    "url": "https://github.com/lintsinghua/oops/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lintsinghua/oops.git",
+    "directory": "npm/oops"
+  },
+  "bin": {
+    "oops": "bin/oops.js"
+  },
+  "files": [
+    "bin/oops.js",
+    "bin/postinstall.js"
+  ],
+  "scripts": {
+    "postinstall": "node bin/postinstall.js"
+  },
+  "optionalDependencies": {
+    "@lintsinghua/oops-darwin-arm64": "0.1.0",
+    "@lintsinghua/oops-darwin-x64": "0.1.0",
+    "@lintsinghua/oops-linux-arm64": "0.1.0",
+    "@lintsinghua/oops-linux-x64": "0.1.0",
+    "@lintsinghua/oops-win32-arm64": "0.1.0",
+    "@lintsinghua/oops-win32-x64": "0.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

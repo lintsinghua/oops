@@ -227,10 +227,10 @@
 - [ ] `CHANGELOG.md`：Keep a Changelog 格式，release 时由 goreleaser changelog（按 conventional commit 分组）生成后人工润色
 - [ ] `.goreleaser.yaml`：darwin/linux/windows × amd64/arm64；tar.gz/zip；`checksums.txt`；cosign keyless 签名；syft SBOM；GitHub artifact attestation（SLSA provenance）；nfpm 打 deb/rpm/apk
 - [ ] Release 工作流：push tag `v*` → 测试 → goreleaser → 发布到 GitHub Releases → 更新 Homebrew tap、Scoop bucket、winget manifest（PR）、npm 包
-- [ ] 安装方式（brew、npm、curl、scoop、winget 为计划渠道，尚未注册；README 目前只发布 `go install` 与 GitHub Releases）：
-  - `brew install <org>/tap/oops`（达到 homebrew-core 的知名度门槛后再提交到 core；当前 core 中没有名为 `oops` 的 formula）
-  - `curl -fsSL https://<domain>/install.sh | sh`（脚本校验 sha256 和 cosign 签名，支持 `OOPS_INSTALL_DIR`）
-  - `npm i -g @oops-cli/oops` 或 `npx @oops-cli/oops`（**注意：npm 上的 `oops` 和 `oops-cli` 都已被占用**；采用 esbuild 式的平台 optionalDependencies 分发二进制，scope 名待定）
+- [ ] 安装方式（scoop、winget 仍是计划渠道；脚本、Homebrew formula、npm 包已在仓库里，tap 仓库和 registry 发布还要等第一次 tag）：
+  - `brew install lintsinghua/tap/oops`（formula 由 goreleaser 推到 `lintsinghua/homebrew-tap`；达到 homebrew-core 的知名度门槛后再提交到 core）
+  - `curl -fsSL https://raw.githubusercontent.com/lintsinghua/oops/main/install.sh | sh`（校验 `checksums.txt` 的 sha256，支持 `OOPS_VERSION` 和 `OOPS_INSTALL_DIR`；Windows 用 `install.ps1`）
+  - `npm i -g @lintsinghua/oops` 或 `npx @lintsinghua/oops`（**npm 上的 `oops` 已被占用**，registry 现有 `oops@0.0.1`；采用 esbuild 式的平台 optionalDependencies 分发二进制）
   - `scoop install oops`、`winget install oops`
   - `go install github.com/<org>/oops/cmd/oops@latest`
   - AUR `oops-bin`（社区维护）
