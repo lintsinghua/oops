@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to publish to npm, e.g. v0.1.0"
+        required: true
 
 permissions:
   contents: write
@@ -11,6 +16,7 @@ permissions:
 jobs:
   release:
     name: goreleaser
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,6 +31,7 @@ jobs:
           cache: true
 
       - name: Run GoReleaser
+        id: goreleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
@@ -36,6 +43,41 @@ jobs:
           # That tap repository has to exist before the first tagged release.
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
+      # npm does not depend on the Homebrew tap. If GoReleaser built dist/
+      # but failed later (for example pushing the formula), still publish npm.
+      - name: Set up Node
+        if: ${{ !cancelled() && hashFiles('dist/checksums.txt') != '' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Publish npm packages
+        if: ${{ !cancelled() && hashFiles('dist/checksums.txt') != '' }}
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/publish-npm.mjs
+
+  npm:
+    name: npm (existing release)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Download release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          mkdir -p dist && cd dist
+          gh release download "$TAG" -R "$GITHUB_REPOSITORY" -p 'oops_*' -p checksums.txt
+          sha256sum -c --ignore-missing checksums.txt
+          for f in oops_*.tar.gz; do d="${f%.tar.gz}"; mkdir "$d" && tar -xzf "$f" -C "$d"; done
+          for f in oops_*.zip; do d="${f%.zip}"; mkdir "$d" && unzip -q "$f" -d "$d"; done
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -44,4 +86,4 @@ jobs:
       - name: Publish npm packages
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: node scripts/publish-npm.mjs
+        run: node scripts/publish-npm.mjs "${{ inputs.tag }}"
