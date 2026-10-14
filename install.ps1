@@ -84,6 +84,7 @@ if (Test-Path -LiteralPath $Dest) {
 
 $Tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("oops-install-" + [guid]::NewGuid().ToString("n"))
 New-Item -ItemType Directory -Force -Path $Tmp | Out-Null
+$staged = $null
 try {
 	$Archive = Join-Path $Tmp $Asset
 	$SumFile = Join-Path $Tmp "checksums.txt"
@@ -151,6 +152,9 @@ try {
 		Move-Item -LiteralPath $staged -Destination $Dest -Force
 	}
 } finally {
+	if ($staged -and (Test-Path -LiteralPath $staged)) {
+		Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
+	}
 	Remove-Item -LiteralPath $Tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
